@@ -10,7 +10,48 @@
 - 💾 **双重存储**: 绑定关系保存在JSON文件，过期时间存储在Redis中
 - 🔄 **SSL支持**: 使用Let's Encrypt证书提供HTTPS访问
 
-## 快速启动
+## 快速部署指南
+
+### 新服务器完整部署步骤
+
+```bash
+# 1. 安装所有依赖（一次性安装）
+apt-get update && apt-get install -y nginx-extras redis-server lua5.1 liblua5.1-0-dev lua-cjson git curl wget vim certbot python3-certbot-nginx
+
+# 2. 启动Redis服务
+systemctl enable redis-server
+systemctl start redis-server
+
+# 3. 克隆项目
+cd /root
+git clone https://github.com/LeonardioLeon67/claude-route-ssl.git
+cd claude-route-ssl
+
+# 4. 创建必要目录并复制Lua脚本
+mkdir -p /var/www/lua
+cp dynamic_auth.lua /var/www/lua/
+chmod 755 /var/www/lua
+
+# 5. 申请SSL证书（替换为你的域名）
+certbot certonly --standalone -d api.yourdomain.com
+
+# 6. 修改nginx.conf配置
+# 编辑nginx.conf，修改以下内容：
+# - server_name 改为你的域名
+# - ssl_certificate 路径改为你的证书路径
+# - ssl_certificate_key 路径改为你的密钥路径
+vim nginx.conf
+
+# 7. 设置文件权限
+touch bindings.json generated_paths.txt
+chown www-data:www-data bindings.json generated_paths.txt
+chmod 666 bindings.json generated_paths.txt
+
+# 8. 启动服务
+./start.sh
+```
+
+## 快速启动（已部署）
 
 ### 方式一：使用启动脚本（推荐）
 ```bash
@@ -179,6 +220,7 @@ chmod 666 bindings.json generated_paths.txt
 - Redis服务器 (用于存储URL过期时间)
 - SSL证书 (Let's Encrypt)
 - 端口443/80开放
+
 
 ## 安全注意事项
 
