@@ -43,7 +43,21 @@ local function format_time(timestamp)
     if timestamp == 0 then
         return "永不过期"
     end
-    return os.date("%Y-%m-%d %H:%M:%S", timestamp)
+    -- 转换为北京时间 (UTC+8)
+    return os.date("%Y-%m-%d %H:%M:%S", timestamp + 8 * 3600) .. " (北京时间)"
+end
+
+-- 从Redis获取URL过期时间
+local function get_url_expire_time(token)
+    local handle = io.popen("redis-cli HGET url:" .. token .. " expire_at")
+    if handle then
+        local result = handle:read("*a")
+        handle:close()
+        if result and result ~= "" then
+            return tonumber(result:match("^%d+"))
+        end
+    end
+    return nil
 end
 
 -- 显示所有账户状态
@@ -63,13 +77,19 @@ local function list_accounts()
         if type(info) == "string" then
             -- 旧格式兼容
             api_key = string.sub(info, 1, 20) .. "..."
-            expire_time = 0
         else
             api_key = string.sub(info.api_key, 1, 20) .. "..."
-            expire_time = info.expire_time
-            if expire_time > 0 and current_time > expire_time then
+        end
+        
+        -- 从Redis获取URL的过期时间
+        local redis_expire_time = get_url_expire_time(token)
+        if redis_expire_time then
+            expire_time = redis_expire_time
+            if current_time > expire_time then
                 status = "已过期"
             end
+        else
+            status = "未知"
         end
         
         print(string.format("%-18s %-12s %-20s %-20s", 
@@ -90,23 +110,12 @@ local function set_expire_time(token, days)
     local current_time = os.time()
     local expire_time = current_time + (days * 24 * 60 * 60)
     
-    -- 确保是新格式
-    if type(bindings[token]) == "string" then
-        bindings[token] = {
-            api_key = bindings[token],
-            expire_time = expire_time
-        }
-    else
-        bindings[token].expire_time = expire_time
-    end
+    -- 更新Redis中的过期时间
+    os.execute("redis-cli HSET url:" .. token .. " expire_at " .. expire_time .. " > /dev/null")
+    os.execute("redis-cli EXPIRE url:" .. token .. " " .. (days * 24 * 60 * 60) .. " > /dev/null")
     
-    if write_bindings(bindings) then
-        print("成功设置 " .. token .. " 的过期时间为 " .. format_time(expire_time))
-        return true
-    else
-        print("错误: 无法保存设置")
-        return false
-    end
+    print("成功设置 " .. token .. " 的过期时间为 " .. format_time(expire_time))
+    return true
 end
 
 -- 清理过期账户
@@ -118,15 +127,17 @@ local function cleanup_expired()
     for token, info in pairs(bindings) do
         local should_remove = false
         
-        if type(info) == "table" and info.expire_time > 0 then
-            if current_time > info.expire_time then
-                should_remove = true
-            end
+        -- 从Redis获取URL的过期时间
+        local redis_expire_time = get_url_expire_time(token)
+        if redis_expire_time and current_time > redis_expire_time then
+            should_remove = true
         end
         
         if should_remove then
             bindings[token] = nil
             removed_count = removed_count + 1
+            -- 同时从Redis中删除
+            os.execute("redis-cli DEL url:" .. token .. " > /dev/null")
             print("已删除过期账户: " .. token)
         end
     end

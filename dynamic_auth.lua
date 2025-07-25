@@ -28,6 +28,26 @@ if string.match(api_key, "^Bearer ") then
     api_key = string.gsub(api_key, "Bearer ", "")
 end
 
+-- 检查URL是否已过期（从Redis获取）
+local redis = require "resty.redis"
+local red = redis:new()
+red:set_timeout(1000)
+
+local ok, err = red:connect("127.0.0.1", 6379)
+if ok then
+    local expire_at, err = red:hget("url:" .. token, "expire_at")
+    if expire_at and expire_at ~= ngx.null then
+        local current_time = os.time()
+        if tonumber(expire_at) < current_time then
+            red:close()
+            ngx.status = 403
+            ngx.say("URL has expired")
+            ngx.exit(403)
+        end
+    end
+    red:close()
+end
+
 -- 读取绑定文件
 local function read_bindings()
     local file = io.open(bindings_file, "r")
@@ -116,13 +136,10 @@ if bindings[token] then
         ngx.exit(403)
     end
 else
-    -- token未绑定，进行首次绑定
-    local current_time = os.time()
-    local expire_time = current_time + (30 * 24 * 60 * 60)  -- 30天后过期
-    
+    -- token未绑定，进行首次绑定（不再设置过期时间，因为URL生成时已经设置）
     bindings[token] = {
         api_key = api_key,
-        expire_time = expire_time
+        expire_time = 0  -- 不在这里设置过期时间
     }
     
     if write_bindings(bindings) then
