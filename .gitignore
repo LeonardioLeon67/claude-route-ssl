@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Build outputs
+dist/
+
+# Logs
+logs/*.log
+*.log
+
+# Runtime data
+dump.rdb
+appendonlydir/
+
+# PM2 ecosystem
+ecosystem.config.js
+
+# Sensitive data
+account/
+product/
+
+# Backups
+backups/
+
+# Redis data
+*.rdb
+*.aof
+appendonlydir/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Environment files
+.env
+.env.local
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# SSL certificates
+*.pem
+*.key
+*.crt
+
+# Nginx runtime
+nginx/logs/

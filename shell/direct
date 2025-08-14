@@ -1,0 +1,210 @@
+#!/bin/bash
+
+# Claude Route SSL Global Management Tool
+# 全局项目管理工具 - direct命令
+
+# 项目配置
+PROJECT_DIR="/home/leon/claude-route-ssl/claude-route-ssl"
+SHELL_DIR="$PROJECT_DIR/shell"
+PROJECT_NAME="Claude Route SSL"
+VERSION="1.0.0"
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# 显示帮助信息
+show_help() {
+    echo -e "${CYAN}Direct - $PROJECT_NAME Management Tool v$VERSION${NC}"
+    echo -e "${CYAN}=================================================================${NC}"
+    echo ""
+    echo -e "${GREEN}Usage:${NC}"
+    echo -e "  direct <command> [options]"
+    echo ""
+    echo -e "${GREEN}Available Commands:${NC}"
+    echo -e "  ${YELLOW}run${NC}                    启动Claude Route SSL项目"
+    echo -e "  ${YELLOW}restart${NC}                重启Claude Route SSL项目"
+    echo -e "  ${YELLOW}stop${NC}                   停止Claude Route SSL项目"
+    echo -e "  ${YELLOW}status${NC}                 查看项目状态"
+    echo -e "  ${YELLOW}medium <account>${NC}       生成Medium级别产品密钥"
+    echo -e "  ${YELLOW}high <account>${NC}         生成High级别产品密钥"
+    echo -e "  ${YELLOW}logs${NC}                   查看PM2日志"
+    echo -e "  ${YELLOW}monitor${NC}                打开PM2监控面板"
+    echo -e "  ${YELLOW}help${NC}                   显示帮助信息"
+    echo -e "  ${YELLOW}version${NC}                显示版本信息"
+    echo ""
+    echo -e "${GREEN}Examples:${NC}"
+    echo -e "  direct run                   # 启动项目"
+    echo -e "  direct status                # 查看状态"
+    echo -e "  direct medium testuser       # 生成Medium密钥"
+    echo -e "  direct high production       # 生成High密钥"
+    echo ""
+    echo -e "${GREEN}Project Info:${NC}"
+    echo -e "  Project Directory: ${BLUE}$PROJECT_DIR${NC}"
+    echo -e "  HTTPS Access: ${BLUE}https://direct.816981.xyz${NC}"
+    echo -e "  Local Access: ${BLUE}http://127.0.0.1:8080${NC}"
+    echo ""
+}
+
+# 显示版本信息
+show_version() {
+    echo -e "${CYAN}Direct - $PROJECT_NAME Management Tool${NC}"
+    echo -e "Version: ${GREEN}$VERSION${NC}"
+    echo -e "Project: ${BLUE}$PROJECT_NAME${NC}"
+    echo -e "Location: ${BLUE}$PROJECT_DIR${NC}"
+    echo ""
+}
+
+# 检查项目目录
+check_project() {
+    if [ ! -d "$PROJECT_DIR" ]; then
+        echo -e "${RED}❌ 错误: 项目目录不存在: $PROJECT_DIR${NC}"
+        exit 1
+    fi
+    
+    if [ ! -d "$SHELL_DIR" ]; then
+        echo -e "${RED}❌ 错误: 脚本目录不存在: $SHELL_DIR${NC}"
+        exit 1
+    fi
+}
+
+# 执行脚本
+run_script() {
+    local script_name="$1"
+    local script_path="$SHELL_DIR/$script_name"
+    
+    if [ ! -f "$script_path" ]; then
+        echo -e "${RED}❌ 错误: 脚本不存在: $script_path${NC}"
+        exit 1
+    fi
+    
+    if [ ! -x "$script_path" ]; then
+        echo -e "${RED}❌ 错误: 脚本没有执行权限: $script_path${NC}"
+        exit 1
+    fi
+    
+    echo -e "${BLUE}🔄 正在执行: $script_name${NC}"
+    echo -e "${PURPLE}📁 工作目录: $SHELL_DIR${NC}"
+    echo ""
+    
+    cd "$SHELL_DIR"
+    bash "$script_path"
+}
+
+# 执行带参数的脚本
+run_script_with_args() {
+    local script_name="$1"
+    shift
+    local script_path="$SHELL_DIR/$script_name"
+    
+    if [ ! -f "$script_path" ]; then
+        echo -e "${RED}❌ 错误: 脚本不存在: $script_path${NC}"
+        exit 1
+    fi
+    
+    if [ ! -x "$script_path" ]; then
+        echo -e "${RED}❌ 错误: 脚本没有执行权限: $script_path${NC}"
+        exit 1
+    fi
+    
+    echo -e "${BLUE}🔄 正在执行: $script_name $@${NC}"
+    echo -e "${PURPLE}📁 工作目录: $SHELL_DIR${NC}"
+    echo ""
+    
+    cd "$SHELL_DIR"
+    bash "$script_path" "$@"
+}
+
+# 主函数
+main() {
+    # 检查项目目录
+    check_project
+    
+    # 检查参数
+    if [ $# -eq 0 ]; then
+        show_help
+        exit 0
+    fi
+    
+    # 解析命令
+    case "$1" in
+        "run")
+            echo -e "${GREEN}🚀 启动 $PROJECT_NAME${NC}"
+            run_script "run.sh"
+            ;;
+        "restart")
+            echo -e "${YELLOW}🔄 重启 $PROJECT_NAME${NC}"
+            run_script "restart.sh"
+            ;;
+        "stop")
+            echo -e "${RED}🛑 停止 $PROJECT_NAME${NC}"
+            run_script "stop.sh"
+            ;;
+        "status")
+            echo -e "${CYAN}📊 查看 $PROJECT_NAME 状态${NC}"
+            run_script "status.sh"
+            ;;
+        "medium")
+            if [ -z "$2" ]; then
+                echo -e "${RED}❌ 错误: 请提供账户名${NC}"
+                echo -e "${YELLOW}用法: direct medium <账户名>${NC}"
+                exit 1
+            fi
+            echo -e "${GREEN}💰 生成 Medium 级别产品密钥${NC}"
+            echo -e "${BLUE}账户: $2${NC}"
+            run_script_with_args "medium.sh" "$2"
+            ;;
+        "high")
+            if [ -z "$2" ]; then
+                echo -e "${RED}❌ 错误: 请提供账户名${NC}"
+                echo -e "${YELLOW}用法: direct high <账户名>${NC}"
+                exit 1
+            fi
+            echo -e "${PURPLE}💎 生成 High 级别产品密钥${NC}"
+            echo -e "${BLUE}账户: $2${NC}"
+            run_script_with_args "high.sh" "$2"
+            ;;
+        "logs")
+            echo -e "${CYAN}📝 查看 PM2 日志${NC}"
+            if command -v pm2 &> /dev/null; then
+                pm2 logs claude-proxy
+            else
+                echo -e "${RED}❌ PM2 未安装${NC}"
+                exit 1
+            fi
+            ;;
+        "monitor")
+            echo -e "${CYAN}📊 打开 PM2 监控面板${NC}"
+            if command -v pm2 &> /dev/null; then
+                pm2 monit
+            else
+                echo -e "${RED}❌ PM2 未安装${NC}"
+                exit 1
+            fi
+            ;;
+        "help"|"--help"|"-h")
+            show_help
+            ;;
+        "version"|"--version"|"-v")
+            show_version
+            ;;
+        *)
+            echo -e "${RED}❌ 错误: 未知命令 '$1'${NC}"
+            echo ""
+            echo -e "${YELLOW}💡 使用 'direct help' 查看可用命令${NC}"
+            exit 1
+            ;;
+    esac
+}
+
+# 错误处理
+set -e
+trap 'echo -e "\n${RED}❌ 命令执行中断${NC}"' INT
+
+# 执行主函数
+main "$@"
