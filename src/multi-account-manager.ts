@@ -77,21 +77,83 @@ class MultiAccountManager {
     }
   }
 
-  // Load all accounts from the account directory
+  // Load all accounts from the account directory and subdirectories
   private async loadAllAccounts(): Promise<void> {
     try {
-      const files = fs.readdirSync(this.accountDir);
-      const jsonFiles = files.filter(f => f.endsWith('.json'));
+      // 递归扫描所有子目录中的JSON文件
+      const accountFiles = this.scanAccountFiles(this.accountDir);
       
-      for (const file of jsonFiles) {
-        const accountName = file.replace('.json', '');
+      for (const accountName of accountFiles) {
         await this.loadAccount(accountName);
       }
       
-      console.log(`[${new Date().toISOString()}] Loaded ${this.accountsCache.size} accounts`);
+      console.log(`[${new Date().toISOString()}] Loaded ${this.accountsCache.size} accounts from all directories`);
     } catch (error) {
       console.error(`[${new Date().toISOString()}] Error loading accounts:`, error);
     }
+  }
+
+  // 递归扫描账户文件
+  private scanAccountFiles(dir: string): string[] {
+    const accountFiles: string[] = [];
+    
+    try {
+      const items = fs.readdirSync(dir);
+      
+      for (const item of items) {
+        if (item.startsWith('.')) continue; // 跳过隐藏文件
+        
+        const fullPath = path.join(dir, item);
+        const stat = fs.statSync(fullPath);
+        
+        if (stat.isDirectory()) {
+          // 递归扫描子目录
+          accountFiles.push(...this.scanAccountFiles(fullPath));
+        } else if (item.endsWith('.json')) {
+          // 找到账户文件
+          const accountName = item.replace('.json', '');
+          accountFiles.push(accountName);
+        }
+      }
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] Error scanning directory ${dir}:`, error);
+    }
+    
+    return accountFiles;
+  }
+
+  // 查找账户文件的完整路径（支持子目录）
+  private findAccountFile(accountName: string): string | null {
+    const fileName = `${accountName}.json`;
+    
+    // 递归查找文件
+    const findInDir = (dir: string): string | null => {
+      try {
+        const items = fs.readdirSync(dir);
+        
+        for (const item of items) {
+          if (item.startsWith('.')) continue; // 跳过隐藏文件
+          
+          const fullPath = path.join(dir, item);
+          const stat = fs.statSync(fullPath);
+          
+          if (stat.isDirectory()) {
+            // 递归搜索子目录
+            const found = findInDir(fullPath);
+            if (found) return found;
+          } else if (item === fileName) {
+            // 找到文件
+            return fullPath;
+          }
+        }
+      } catch (error) {
+        console.error(`[${new Date().toISOString()}] Error searching directory ${dir}:`, error);
+      }
+      
+      return null;
+    };
+    
+    return findInDir(this.accountDir);
   }
 
   // Load a specific account
@@ -118,9 +180,9 @@ class MultiAccountManager {
         }
       }
       
-      // 🔥 强制从文件系统重新读取最新数据
-      const filePath = path.join(this.accountDir, `${accountName}.json`);
-      if (!fs.existsSync(filePath)) {
+      // 🔥 强制从文件系统重新读取最新数据 - 支持在子目录中查找
+      const filePath = this.findAccountFile(accountName);
+      if (!filePath) {
         console.error(`[${new Date().toISOString()}] Account file not found: ${accountName}`);
         return null;
       }
@@ -179,8 +241,13 @@ class MultiAccountManager {
       this.accountsCache.set(accountName, accountInfo);
       this.cacheLoadTime = Date.now();
       
-      // Save to file
-      const filePath = path.join(this.accountDir, `${accountName}.json`);
+      // Save to file - 如果文件已存在，保存到原位置；否则保存到根目录
+      let filePath = this.findAccountFile(accountName);
+      if (!filePath) {
+        // 文件不存在，保存到根目录
+        filePath = path.join(this.accountDir, `${accountName}.json`);
+      }
+      
       const fileData: AccountCredentials = {
         claudeAiOauth: credentials
       };
