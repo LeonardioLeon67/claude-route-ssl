@@ -230,16 +230,12 @@ async function proxyRequest(req: express.Request, res: express.Response) {
       
       if (keyData[limitKey]) {
         const now = Date.now();
-        // 🧪 特殊测试密钥：3分钟窗口用于快速测试重置功能
-        const isTestKey = clientKey === 'sk-cli-v1-0f3397d7229f592e111c26c2748572ab7268347090fe6ebec0fe85622db220be';
-        const windowSize = isTestKey ? 3 * 60 * 1000 : 5 * 60 * 60 * 1000; // 测试密钥：3分钟，其他：5小时
+        // 5小时时间窗口 (生产环境标准配置)
+        const windowSize = 5 * 60 * 60 * 1000; // 5小时 = 18000000毫秒
         const maxRequests = parseInt(keyData[limitKey]);
         let currentWindowStart = parseInt(keyData[windowStartKey] || now.toString());
         let currentWindowRequests = parseInt(keyData[countKey] || '0');
         
-        if (isTestKey) {
-          console.log(`[${new Date().toISOString()}] 🧪 TEST KEY: Using 3-minute window for quick reset testing`);
-        }
         
         // 检查是否需要重置时间窗口
         if (now - currentWindowStart >= windowSize) {
@@ -252,7 +248,7 @@ async function proxyRequest(req: express.Request, res: express.Response) {
               [windowStartKey]: newWindowStart.toString(),
               [countKey]: '0'
             });
-            console.log(`[${new Date().toISOString()}] 🔄 Reset ${modelType} ${isTestKey ? '3-minute' : '5-hour'} window for key: ${clientKey.substring(0, 20)}... (New window starts now)`);
+            console.log(`[${new Date().toISOString()}] 🔄 Reset ${modelType} 5-hour window for key: ${clientKey.substring(0, 20)}... (New window starts now)`);
           } catch (error) {
             console.error(`Error resetting ${modelType} time window:`, error);
           }
@@ -266,17 +262,9 @@ async function proxyRequest(req: express.Request, res: express.Response) {
           const remainingTime = windowSize - (now - currentWindowStart);
           const modelDisplayName = modelType === 'opus_4' ? 'Opus 4.1' : 'Sonnet 4';
           
-          let timeMessage;
-          if (isTestKey) {
-            const secondsLeft = Math.floor(remainingTime / 1000);
-            const minutesLeft = Math.floor(secondsLeft / 60);
-            const remainingSeconds = secondsLeft % 60;
-            timeMessage = `Usage will be reset in ${minutesLeft}m ${remainingSeconds}s`;
-          } else {
-            const hoursLeft = Math.floor(remainingTime / (60 * 60 * 1000));
-            const minutesLeft = Math.floor((remainingTime % (60 * 60 * 1000)) / (60 * 1000));
-            timeMessage = `Usage will be reset in ${hoursLeft}h ${minutesLeft}m`;
-          }
+          const hoursLeft = Math.floor(remainingTime / (60 * 60 * 1000));
+          const minutesLeft = Math.floor((remainingTime % (60 * 60 * 1000)) / (60 * 1000));
+          const timeMessage = `Usage will be reset in ${hoursLeft}h ${minutesLeft}m`;
           
           return res.status(429).json({
             type: 'error',
@@ -388,20 +376,22 @@ async function proxyRequest(req: express.Request, res: express.Response) {
       const responseTime = Date.now() - startTime;
       console.log(`Request completed in ${responseTime}ms`);
       
-      // 🧪 临时测试：无论响应状态如何都递增计数器（用于测试限制功能）
-      try {
-        // 基于模型的计数（High和Supreme级别）
-        if (modelType && (keyData.tier === 'high' || keyData.tier === 'supreme') && keyData[limitKey]) {
-          const newCount = await redisClient.hIncrBy(`client_keys:${clientKey}`, countKey, 1);
-          const modelDisplayName = modelType === 'opus_4' ? 'Opus 4.1' : 'Sonnet 4';
-          console.log(`[${new Date().toISOString()}] 🧪 TEST MODE: ${modelDisplayName} request count updated: ${newCount}/${keyData[limitKey]} for key ${clientKey.substring(0, 20)}... (status: ${response.status})`);
+      // 成功完成请求后递增计数器
+      if (response.status >= 200 && response.status < 400) {
+        try {
+          // 基于模型的计数（High和Supreme级别）
+          if (modelType && (keyData.tier === 'high' || keyData.tier === 'supreme') && keyData[limitKey]) {
+            const newCount = await redisClient.hIncrBy(`client_keys:${clientKey}`, countKey, 1);
+            const modelDisplayName = modelType === 'opus_4' ? 'Opus 4.1' : 'Sonnet 4';
+            console.log(`[${new Date().toISOString()}] ${modelDisplayName} request count updated: ${newCount}/${keyData[limitKey]} for key ${clientKey.substring(0, 20)}...`);
+          }
+          // Medium级别无限制，不需要计数
+          else if (keyData.tier === 'medium') {
+            console.log(`[${new Date().toISOString()}] Medium tier request completed - no counting needed for key ${clientKey.substring(0, 20)}...`);
+          }
+        } catch (error) {
+          console.error('Error updating request count:', error);
         }
-        // Medium级别无限制，不需要计数
-        else if (keyData.tier === 'medium') {
-          console.log(`[${new Date().toISOString()}] Medium tier request completed - no counting needed for key ${clientKey.substring(0, 20)}...`);
-        }
-      } catch (error) {
-        console.error('Error updating request count:', error);
       }
     });
     
