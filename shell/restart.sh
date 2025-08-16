@@ -25,28 +25,38 @@ if ! npm run build; then
 fi
 echo "✅ 项目构建成功"
 
-# Step 2: 重启PM2进程
+# Step 2: 重启PM2进程（包括主服务和定时任务）
 echo "📋 Step 2: 重启PM2进程..."
-if pm2 describe $PROJECT_NAME > /dev/null 2>&1; then
-    echo "🔄 重启现有PM2进程..."
-    pm2 restart $PROJECT_NAME
-    echo "✅ PM2进程重启成功"
-else
-    echo "⚠️  PM2进程不存在，启动新进程..."
-    pm2 start ecosystem.config.js --env production
-    echo "✅ PM2进程启动成功"
-fi
+
+# 先停止并删除所有相关进程
+pm2 delete $PROJECT_NAME 2>/dev/null || true
+pm2 delete expire-updater 2>/dev/null || true
+
+# 使用ecosystem配置文件重新启动所有应用
+echo "🔄 重启PM2进程组..."
+pm2 start ecosystem.config.js --env production
 
 # 等待进程重启
 sleep 3
 
-# 检查PM2进程状态
+# 检查主服务进程状态
 if pm2 describe $PROJECT_NAME | grep -q "online"; then
-    echo "✅ PM2进程运行正常"
+    echo "✅ 主服务进程运行正常"
 else
-    echo "❌ PM2进程重启失败"
+    echo "❌ 主服务进程重启失败"
     pm2 logs $PROJECT_NAME --lines 10
     exit 1
+fi
+
+# 检查定时任务状态
+if pm2 describe expire-updater > /dev/null 2>&1; then
+    echo "✅ 过期更新定时任务已重新注册"
+    # 立即运行一次更新任务
+    echo "🔄 执行一次过期日期更新..."
+    python3 "$PROJECT_DIR/update-expire-dates.py"
+    echo "✅ 过期日期更新完成"
+else
+    echo "⚠️  过期更新定时任务注册失败"
 fi
 
 # Step 3: 重载nginx配置

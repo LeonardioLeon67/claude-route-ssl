@@ -1,0 +1,19 @@
+[
+  {
+    "timestamp": "2025-08-13T12:57:54.187Z",
+    "request": {
+      "method": "GET",
+      "url": "/",
+      "headers": {
+        "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/126.0.0.0 Safari/537.36"
+      }
+    },
+    "error": {
+      "message": "",
+      "code": "ETIMEDOUT",
+      "time": 264
+    },
+    "clientIp": "3.143.33.63",
+    "forwardedTo": "https://api.anthropic.com/"
+  }
+]

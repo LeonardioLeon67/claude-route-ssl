@@ -12,20 +12,30 @@ cd $PROJECT_DIR
 
 # Step 1: 停止PM2进程
 echo "📋 Step 1: 停止PM2进程..."
+
+# 停止主服务
 if pm2 list | grep -q "claude-proxy.*online"; then
     if pm2 stop claude-proxy; then
-        echo "✅ PM2进程已停止"
+        echo "✅ 主服务进程已停止"
     else
-        echo "❌ PM2进程停止失败!"
+        echo "❌ 主服务进程停止失败!"
         exit 1
     fi
 else
-    echo "⚠️  PM2进程未运行"
+    echo "⚠️  主服务进程未运行"
 fi
 
-# Step 2: 停止进程但保留配置（不删除）
-echo "📋 Step 2: 保留PM2进程配置..."
-echo "⏸️  PM2进程已停止但保留配置"
+# 停止并删除定时任务
+if pm2 describe expire-updater > /dev/null 2>&1; then
+    pm2 delete expire-updater
+    echo "✅ 过期更新定时任务已清除"
+else
+    echo "⚠️  过期更新定时任务未运行"
+fi
+
+# Step 2: 停止进程但保留配置（不删除主服务）
+echo "📋 Step 2: 保留PM2主服务配置..."
+echo "⏸️  主服务已停止但保留配置"
 echo "💡 如需完全删除进程配置: pm2 delete claude-proxy"
 
 # Step 3: 检查nginx状态 (保持运行)

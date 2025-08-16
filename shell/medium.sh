@@ -35,15 +35,35 @@ ensure_directories() {
     fi
 }
 
-# 检查账户是否存在
+# 检查账户是否存在（支持分级目录结构）
 check_account() {
     local account_name=$1
-    local account_file="${ACCOUNT_DIR}/${account_name}.json"
+    local account_file=""
     
-    if [ ! -f "$account_file" ]; then
-        echo -e "${RED}Error: Account file not found: ${account_file}${NC}"
+    # 首先在medium子目录中查找
+    if [ -f "${ACCOUNT_DIR}/medium/${account_name}.json" ]; then
+        account_file="${ACCOUNT_DIR}/medium/${account_name}.json"
+    # 然后在根目录中查找（向后兼容）
+    elif [ -f "${ACCOUNT_DIR}/${account_name}.json" ]; then
+        account_file="${ACCOUNT_DIR}/${account_name}.json"
+    # 最后在所有子目录中递归查找
+    else
+        account_file=$(find "${ACCOUNT_DIR}" -name "${account_name}.json" -type f 2>/dev/null | head -1)
+    fi
+    
+    if [ -z "$account_file" ] || [ ! -f "$account_file" ]; then
+        echo -e "${RED}Error: Account file not found for: ${account_name}${NC}"
         echo "Available accounts:"
-        ls -1 "${ACCOUNT_DIR}/"*.json 2>/dev/null | xargs -n1 basename | sed 's/\.json$//' | sed 's/^/  - /'
+        # 递归显示所有级别的账户
+        find "${ACCOUNT_DIR}" -name "*.json" -type f 2>/dev/null | while read file; do
+            local name=$(basename "$file" .json)
+            local level=$(basename "$(dirname "$file")")
+            if [ "$level" = "account" ]; then
+                echo "  - $name"
+            else
+                echo "  - $name ($level)"
+            fi
+        done
         return 1
     fi
     
@@ -62,7 +82,10 @@ add_key_mapping() {
     local client_key=$1
     local client_name=$2
     local account_name=$3
+    local use_pool=$4  # "pool" 或具体账户名
+    local expiry_days=${5:-30}  # 默认30天有效期
     local current_time=$(date +%s000)  # 毫秒时间戳
+    local expiry_time=$(date -d "+${expiry_days} days" +%s000)  # 过期时间
     
     
     # 如果产品文件不存在，创建一个空的JSON文件
@@ -75,12 +98,13 @@ add_key_mapping() {
 import json
 import sys
 import redis
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 key = "$client_key"
 client_name = "$client_name"
 account_name = "$account_name"
 timestamp = $current_time
+expiry_timestamp = $expiry_time
 PRODUCT_FILE = "$PRODUCT_FILE"
 
 # 连接Redis
@@ -105,10 +129,12 @@ except:
 # 添加新的产品记录
 products[key] = {
     "account": account_name,
-    "tier": "medium",
+    "tier": "medium", 
     "status": "unsold",
-    "soldAt": "NULL",
-    "orderNo": "NULL"
+    "soldAt": None,
+    "orderNo": None,
+    "expiresAt": None,
+    "expiresDate": None
 }
 
 # 保存产品文件
@@ -124,10 +150,13 @@ if redis_connected:
         redis_key = f"client_keys:{key}"
         r.hset(redis_key, mapping={
             "client_name": client_name,
-            "account_name": account_name,
+            "account_name": account_name if account_name != "pool" else "medium_pool",
+            "use_pool": "true" if account_name == "pool" else "false",
             "tier": "medium",
             "created_at": timestamp,
-            "created_date": datetime.now().isoformat(),
+            "created_date": datetime.now(timezone(timedelta(hours=8))).isoformat(),
+            "expires_at": str(expiry_timestamp),
+            "expires_date": datetime.fromtimestamp(expiry_timestamp/1000).isoformat(),
             "active": "true",
             "status": "unsold"  # 添加销售状态
             # Medium级别无请求次数限制
@@ -150,6 +179,7 @@ if redis_connected:
                 'name': client_name,
                 'tier': 'medium',
                 'createdAt': timestamp,
+                'expiresAt': None,
                 'status': 'unsold'
             })
             r.set(account_key, json.dumps(account_info))
@@ -162,7 +192,8 @@ if redis_connected:
             "status": "unsold",
             "sold_at": "",
             "order_no": "",
-            "created_at": timestamp
+            "created_at": timestamp,
+            "expires_at": str(expiry_timestamp)
         })
         
         print(f"Key saved to Redis under client_keys:{key}")
@@ -183,14 +214,33 @@ EOF
 
 # 显示使用说明
 show_usage() {
-    echo "Usage: $0 [account-name]"
+    echo "Usage: $0 [account-name|pool] [expiry-days]"
+    echo ""
+    echo "Parameters:"
+    echo "  account-name    Account to bind the key to, or 'pool' for account pool (default: pool)"
+    echo "  expiry-days     Key validity in days (default: 30)"
     echo ""
     echo "Examples:"
-    echo "  $0 jasonlucy8160-outlook    # Generate medium key for specific account"
-    echo "  $0                           # Interactive mode (select account)"
+    echo "  $0                               # Use account pool (default)"
+    echo "  $0 pool                          # Explicitly use account pool"
+    echo "  $0 pool 60                       # Account pool with 60 days expiry"
+    echo "  $0 jasonlucy8160-outlook        # Bind to specific account"
+    echo "  $0 jasonlucy8160-outlook 60     # Specific account with 60 days expiry"
+    echo ""
+    echo "Account Pool Mode:"
+    echo "  When using 'pool' or no parameters, the key will randomly select"
+    echo "  an account from /account/medium/ directory for each request."
     echo ""
     echo "Available accounts:"
-    ls -1 "${ACCOUNT_DIR}/"*.json 2>/dev/null | xargs -n1 basename | sed 's/\.json$//' | sed 's/^/  - /'
+    find "${ACCOUNT_DIR}" -name "*.json" -type f 2>/dev/null | while read file; do
+        local name=$(basename "$file" .json)
+        local level=$(basename "$(dirname "$file")")
+        if [ "$level" = "account" ]; then
+            echo "  - $name"
+        else
+            echo "  - $name ($level)"
+        fi
+    done
 }
 
 # 主程序
@@ -203,8 +253,15 @@ main() {
     
     # 获取账户名称
     local account_name=""
+    local use_pool="false"
     
-    if [ $# -eq 1 ]; then
+    if [ $# -eq 0 ]; then
+        # 无参数，默认使用账户池
+        account_name="pool"
+        use_pool="true"
+        echo -e "${BLUE}Using account pool mode for Medium tier (default)${NC}"
+        local expiry_days=30
+    elif [ $# -ge 1 ]; then
         # 从命令行参数获取账户名
         account_name=$1
         
@@ -213,15 +270,50 @@ main() {
             show_usage
             exit 0
         fi
+        
+        # 检查是否使用账户池
+        if [ "$account_name" == "pool" ]; then
+            use_pool="true"
+            echo -e "${BLUE}Using account pool mode for Medium tier${NC}"
+        fi
+        
+        # 检查第二个参数是否为有效期天数
+        local expiry_days=30  # 默认30天
+        if [ $# -eq 2 ]; then
+            if [[ $2 =~ ^[0-9]+$ ]] && [ $2 -gt 0 ]; then
+                expiry_days=$2
+            else
+                echo -e "${RED}Error: Expiry days must be a positive integer${NC}"
+                exit 1
+            fi
+        fi
     else
         # 交互式选择账户
         echo "Available accounts:"
-        local accounts=($(ls -1 "${ACCOUNT_DIR}/"*.json 2>/dev/null | xargs -n1 basename | sed 's/\.json$//'))
         
-        if [ ${#accounts[@]} -eq 0 ]; then
+        # 使用数组收集所有账户文件
+        local account_files=()
+        while IFS= read -r -d '' file; do
+            account_files+=("$file")
+        done < <(find "${ACCOUNT_DIR}" -name "*.json" -type f -print0 2>/dev/null)
+        
+        if [ ${#account_files[@]} -eq 0 ]; then
             echo -e "${RED}Error: No accounts found in ${ACCOUNT_DIR}${NC}"
             exit 1
         fi
+        
+        local accounts=()
+        local account_names=()
+        for file in "${account_files[@]}"; do
+            local name=$(basename "$file" .json)
+            local level=$(basename "$(dirname "$file")")
+            account_names+=("$name")  # 存储实际的账户名
+            if [ "$level" = "account" ]; then
+                accounts+=("$name")
+            else
+                accounts+=("$name ($level)")
+            fi
+        done
         
         for i in "${!accounts[@]}"; do
             echo "  $((i+1)). ${accounts[$i]}"
@@ -231,23 +323,29 @@ main() {
         read -p "Select account number (1-${#accounts[@]}): " selection
         
         if [[ "$selection" =~ ^[0-9]+$ ]] && [ $selection -ge 1 ] && [ $selection -le ${#accounts[@]} ]; then
-            account_name=${accounts[$((selection-1))]}
+            account_name=${account_names[$((selection-1))]}  # 使用实际的账户名
         else
             echo -e "${RED}Invalid selection${NC}"
             exit 1
         fi
     fi
     
-    # 检查账户是否存在
-    if ! check_account "$account_name"; then
-        exit 1
+    # 检查账户是否存在（如果不是账户池模式）
+    if [ "$use_pool" != "true" ] && [ "$account_name" != "pool" ]; then
+        if ! check_account "$account_name"; then
+            exit 1
+        fi
     fi
     
     echo -e "${BLUE}Selected account: ${account_name}${NC}"
     echo ""
     
     # 自动生成客户端名称
-    client_name="${account_name}_Medium_$(date +%Y%m%d_%H%M%S)"
+    if [ "$use_pool" == "true" ] || [ "$account_name" == "pool" ]; then
+        client_name="MediumPool_$(TZ='Asia/Shanghai' date +%Y%m%d_%H%M%S)"
+    else
+        client_name="${account_name}_Medium_$(TZ='Asia/Shanghai' date +%Y%m%d_%H%M%S)"
+    fi
     
     # 生成新密钥（64字符长度）
     new_key=$(generate_key)
@@ -256,16 +354,24 @@ main() {
     echo -e "${YELLOW}Generating new medium product key for account: ${account_name}...${NC}"
     
     # 添加到映射文件、Redis和产品文件
-    if add_key_mapping "$new_key" "$client_name" "$account_name"; then
+    local display_account="$account_name"
+    if [ "$use_pool" == "true" ] || [ "$account_name" == "pool" ]; then
+        account_name="pool"  # 传递"pool"标识使用账户池
+        display_account="Account Pool (Dynamic allocation with 24-hour rotation)"
+    fi
+    
+    if add_key_mapping "$new_key" "$client_name" "$account_name" "$use_pool" "${expiry_days:-30}"; then
         echo -e "${GREEN}✓ Medium product key successfully generated and registered${NC}"
         echo ""
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo -e "${GREEN}Account:${NC}      $account_name"
+        echo -e "${GREEN}Account:${NC}      $display_account"
         echo -e "${GREEN}Product Tier:${NC} Medium"
         echo -e "${GREEN}Product Name:${NC} $client_name"
         echo -e "${GREEN}Product Key:${NC}  $new_key"
         echo -e "${GREEN}Status:${NC}       unsold"
-        echo -e "${GREEN}Created:${NC}      $(date '+%Y-%m-%d %H:%M:%S')"
+        echo -e "${GREEN}Created:${NC}      $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S') (北京时间)"
+        echo -e "${GREEN}Expires:${NC}      $(TZ='Asia/Shanghai' date -d "+${expiry_days:-30} days" '+%Y-%m-%d %H:%M:%S') (北京时间)"
+        echo -e "${GREEN}Valid Days:${NC}   ${expiry_days:-30} days"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
         echo "Files Updated:"
@@ -274,7 +380,12 @@ main() {
         echo "✓ Redis: client_keys:${new_key}"
         echo "✓ Redis: medium_products:${new_key}"
         echo ""
-        echo "This key is bound to account: $account_name"
+        if [ "$use_pool" == "true" ] || [ "$account_name" == "pool" ]; then
+            echo "This key uses Medium account pool with slot-based allocation"
+            echo "Accounts will rotate every 24 hours within available slots"
+        else
+            echo "This key is bound to account: $account_name"
+        fi
         echo "Product tier: Medium"
         echo "Status: unsold (ready for sale)"
         echo ""
