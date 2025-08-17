@@ -48,6 +48,7 @@ class TokenRefresherRedis {
   
   // 🎯 多账户定时器管理
   private accountTimers: Map<string, NodeJS.Timeout> = new Map(); // 每个账户的专用定时器
+  private accountScanTimer: NodeJS.Timeout | null = null; // 定期扫描新账户的定时器
   private accountManager: any = null; // 多账户管理器引用
   
   // Memory cache for credentials
@@ -818,8 +819,11 @@ class TokenRefresherRedis {
     // 停止所有现有定时器
     this.stopAllAccountTimers();
     
-    // 为所有账户设置独立的定时器
-    await this.scheduleRefreshForAllAccounts();
+    // 首次执行完全同步（与文件系统同步）
+    await this.syncAccountsWithFileSystem();
+    
+    // 启动定期完全同步任务（每4小时）
+    this.startPeriodicAccountScan();
   }
   
   // 🔍 为所有账户设置独立的精确定时器
@@ -858,6 +862,255 @@ class TokenRefresherRedis {
       console.log(`[${getBeijingTime()}] 🔄 回退到30分钟轮询模式`);
       this.startAutoRefresh(30);
     }
+  }
+
+  // 🔍 启动定期扫描新账户的任务
+  private startPeriodicAccountScan(): void {
+    console.log(`[${getBeijingTime()}] 🔄 启动定期账户同步任务（每4小时完全同步一次）`);
+    
+    // 清除现有的扫描定时器
+    if (this.accountScanTimer) {
+      clearInterval(this.accountScanTimer);
+    }
+    
+    // 设置每4小时进行完全同步
+    this.accountScanTimer = setInterval(async () => {
+      await this.syncAccountsWithFileSystem();
+    }, 4 * 60 * 60 * 1000); // 4小时
+  }
+
+  // 🔄 完全同步账户：确保Redis与文件系统账户完全一致
+  private async syncAccountsWithFileSystem(): Promise<void> {
+    try {
+      console.log(`[${getBeijingTime()}] 🔄 开始严格同步账户与文件系统 (确保完全一致)...`);
+      
+      const accountDir = path.join(__dirname, '..', 'account');
+      if (!fs.existsSync(accountDir)) {
+        console.log(`[${getBeijingTime()}] ⚠️ 账户目录不存在，跳过同步`);
+        return;
+      }
+      
+      if (!this.isConnected) {
+        console.log(`[${getBeijingTime()}] ⚠️ Redis未连接，跳过同步`);
+        return;
+      }
+
+      // 第1步：扫描文件系统中按级别分类的所有账户
+      const fileAccountsByTier = this.getFileAccountsByTier(accountDir);
+      const allFileAccounts = new Set([
+        ...fileAccountsByTier.medium,
+        ...fileAccountsByTier.high,
+        ...fileAccountsByTier.supreme
+      ]);
+      
+      console.log(`[${getBeijingTime()}] 📁 文件系统账户分布:`);
+      console.log(`[${getBeijingTime()}] 📁   Medium: ${fileAccountsByTier.medium.length} 个 - ${fileAccountsByTier.medium.join(', ')}`);
+      console.log(`[${getBeijingTime()}] 📁   High: ${fileAccountsByTier.high.length} 个 - ${fileAccountsByTier.high.join(', ')}`);
+      console.log(`[${getBeijingTime()}] 📁   Supreme: ${fileAccountsByTier.supreme.length} 个 - ${fileAccountsByTier.supreme.join(', ')}`);
+      console.log(`[${getBeijingTime()}] 📁   总计: ${allFileAccounts.size} 个账户`);
+
+      // 第2步：获取Redis中所有相关的账户记录
+      const redisAccounts = await this.getAllRedisAccounts();
+      console.log(`[${getBeijingTime()}] 🔍 Redis中发现的账户:`);
+      console.log(`[${getBeijingTime()}] 🔍   调度记录: ${redisAccounts.scheduled.size} 个 - ${Array.from(redisAccounts.scheduled).join(', ')}`);
+      console.log(`[${getBeijingTime()}] 🔍   永久绑定: ${redisAccounts.bound.size} 个 - ${Array.from(redisAccounts.bound).join(', ')}`);
+      console.log(`[${getBeijingTime()}] 🔍   Slot记录: ${redisAccounts.withSlots.size} 个 - ${Array.from(redisAccounts.withSlots).join(', ')}`);
+
+      // 第3步：全面清理Redis中不存在于文件系统的账户
+      await this.comprehensiveCleanup(allFileAccounts, redisAccounts);
+
+      // 第4步：为文件系统中的所有账户设置Redis记录
+      await this.ensureAllFileAccountsInRedis(allFileAccounts);
+
+      // 第5步：最终验证和统计
+      await this.validateSyncResult(fileAccountsByTier, allFileAccounts);
+      
+      console.log(`[${getBeijingTime()}] 🎉 严格同步完成！Redis现在与文件系统完全一致`);
+      
+    } catch (error) {
+      console.error(`[${getBeijingTime()}] ❌ 严格同步时出错:`, error);
+    }
+  }
+
+  // 获取文件系统中按级别分类的账户
+  private getFileAccountsByTier(accountDir: string): { medium: string[], high: string[], supreme: string[] } {
+    const result = { medium: [] as string[], high: [] as string[], supreme: [] as string[] };
+    
+    for (const tier of ['medium', 'high', 'supreme'] as const) {
+      const tierDir = path.join(accountDir, tier);
+      if (fs.existsSync(tierDir)) {
+        const files = fs.readdirSync(tierDir).filter(file => file.endsWith('.json'));
+        result[tier] = files.map(file => path.basename(file, '.json'));
+      }
+    }
+    
+    return result;
+  }
+
+  // 获取Redis中所有相关的账户记录
+  private async getAllRedisAccounts(): Promise<{
+    scheduled: Set<string>,
+    bound: Set<string>,
+    withSlots: Set<string>
+  }> {
+    const result = {
+      scheduled: new Set<string>(),
+      bound: new Set<string>(),
+      withSlots: new Set<string>()
+    };
+
+    // 获取调度记录中的账户
+    const scheduledKeys = await this.redisClient.keys('refresh_schedules:*');
+    for (const key of scheduledKeys) {
+      result.scheduled.add(key.split(':')[1]);
+    }
+
+    // 获取永久绑定中的账户
+    for (const tier of ['medium', 'high', 'supreme']) {
+      const permanentBindingKey = `${tier}_pool:permanent_binding`;
+      const bindingData = await this.redisClient.hGetAll(permanentBindingKey);
+      for (const boundAccount of Object.values(bindingData)) {
+        result.bound.add(boundAccount);
+      }
+    }
+
+    // 获取有slot记录的账户
+    for (const tier of ['medium', 'high', 'supreme']) {
+      const slotKeys = await this.redisClient.keys(`${tier}_pool:slots:*`);
+      for (const key of slotKeys) {
+        const accountName = key.split(':').pop();
+        if (accountName) {
+          result.withSlots.add(accountName);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  // 全面清理Redis中不存在于文件系统的账户
+  private async comprehensiveCleanup(fileAccounts: Set<string>, redisAccounts: any): Promise<void> {
+    const allRedisAccounts = new Set([
+      ...redisAccounts.scheduled,
+      ...redisAccounts.bound,
+      ...redisAccounts.withSlots
+    ]);
+
+    const accountsToRemove = Array.from(allRedisAccounts).filter(account => !fileAccounts.has(account));
+    
+    if (accountsToRemove.length > 0) {
+      console.log(`[${getBeijingTime()}] 🗑️ 开始全面清理 ${accountsToRemove.length} 个不存在的账户: ${accountsToRemove.join(', ')}`);
+      
+      for (const accountName of accountsToRemove) {
+        await this.removeAccountFromRedis(accountName);
+        console.log(`[${getBeijingTime()}] ✅ 已彻底清理账户 ${accountName} 的所有Redis数据`);
+      }
+    } else {
+      console.log(`[${getBeijingTime()}] ✅ 无需清理，所有Redis账户都存在于文件系统中`);
+    }
+  }
+
+  // 彻底删除账户的所有Redis记录
+  private async removeAccountFromRedis(accountName: string): Promise<void> {
+    try {
+      // 清除定时器
+      this.clearAccountTimer(accountName);
+      
+      // 删除调度记录
+      await this.redisClient.del(`refresh_schedules:${accountName}`);
+      
+      // 删除所有相关键
+      const keysToDelete = [
+        `accounts:${accountName}`,
+        `medium_pool:slots:${accountName}`,
+        `high_pool:slots:${accountName}`,
+        `supreme_pool:slots:${accountName}`,
+        `account_blacklist:medium:${accountName}`,
+        `account_blacklist:high:${accountName}`,
+        `account_blacklist:supreme:${accountName}`
+      ];
+      
+      for (const key of keysToDelete) {
+        await this.redisClient.del(key);
+      }
+      
+      // 清理永久绑定记录
+      for (const tier of ['medium', 'high', 'supreme']) {
+        const permanentBindingKey = `${tier}_pool:permanent_binding`;
+        const bindingData = await this.redisClient.hGetAll(permanentBindingKey);
+        const keysToRemove = [];
+        
+        for (const [key, boundAccount] of Object.entries(bindingData)) {
+          if (boundAccount === accountName) {
+            keysToRemove.push(key);
+          }
+        }
+        
+        if (keysToRemove.length > 0) {
+          await this.redisClient.hDel(permanentBindingKey, keysToRemove);
+          console.log(`[${getBeijingTime()}] 🔗 清理${tier}级别中绑定到${accountName}的${keysToRemove.length}个密钥`);
+        }
+      }
+      
+    } catch (error) {
+      console.error(`[${getBeijingTime()}] ❌ 清理账户 ${accountName} 失败:`, error);
+    }
+  }
+
+  // 确保文件系统中的所有账户都在Redis中有对应记录
+  private async ensureAllFileAccountsInRedis(fileAccounts: Set<string>): Promise<void> {
+    console.log(`[${getBeijingTime()}] ⚡ 为文件系统中的 ${fileAccounts.size} 个账户确保Redis记录...`);
+    
+    let syncedCount = 0;
+    for (const accountName of fileAccounts) {
+      try {
+        // 清除现有定时器并重新设置（仅设置定时器，不修改账户数据）
+        this.clearAccountTimer(accountName);
+        await this.scheduleAccountRefresh(accountName, true); // true = 跳过立即刷新检查
+        syncedCount++;
+        console.log(`[${getBeijingTime()}] ✅ 已确保账户 ${accountName} 的Redis记录`);
+      } catch (error) {
+        console.error(`[${getBeijingTime()}] ❌ 设置账户 ${accountName} 失败:`, error);
+      }
+    }
+    
+    console.log(`[${getBeijingTime()}] ⚡ 成功设置 ${syncedCount}/${fileAccounts.size} 个账户的Redis记录`);
+  }
+
+  // 验证同步结果
+  private async validateSyncResult(fileAccountsByTier: any, allFileAccounts: Set<string>): Promise<void> {
+    console.log(`[${getBeijingTime()}] 🔍 验证同步结果...`);
+    
+    // 重新检查Redis中的账户
+    const finalRedisAccounts = await this.getAllRedisAccounts();
+    
+    const extraInRedis = Array.from(new Set([
+      ...finalRedisAccounts.scheduled,
+      ...finalRedisAccounts.bound,
+      ...finalRedisAccounts.withSlots
+    ])).filter(account => !allFileAccounts.has(account));
+    
+    const missingFromRedis = Array.from(allFileAccounts).filter(account => 
+      !finalRedisAccounts.scheduled.has(account)
+    );
+    
+    if (extraInRedis.length > 0) {
+      console.log(`[${getBeijingTime()}] ⚠️ Redis中仍有多余账户: ${extraInRedis.join(', ')}`);
+    }
+    
+    if (missingFromRedis.length > 0) {
+      console.log(`[${getBeijingTime()}] ⚠️ Redis中缺少账户: ${missingFromRedis.join(', ')}`);
+    }
+    
+    if (extraInRedis.length === 0 && missingFromRedis.length === 0) {
+      console.log(`[${getBeijingTime()}] ✅ 验证通过：Redis与文件系统完全一致！`);
+    }
+    
+    console.log(`[${getBeijingTime()}] 📊 最终统计:`);
+    console.log(`[${getBeijingTime()}] 📊   文件系统账户: ${allFileAccounts.size} 个`);
+    console.log(`[${getBeijingTime()}] 📊   Redis调度记录: ${finalRedisAccounts.scheduled.size} 个`);
+    console.log(`[${getBeijingTime()}] 📊   Redis绑定记录: ${finalRedisAccounts.bound.size} 个`);
+    console.log(`[${getBeijingTime()}] 📊   Redis Slot记录: ${finalRedisAccounts.withSlots.size} 个`);
   }
 
   // 🎯 为单个账户设置精确定时器
