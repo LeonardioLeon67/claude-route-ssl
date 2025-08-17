@@ -399,22 +399,63 @@ claude-route-ssl/
 ```bash
 direct logs              # 查看PM2日志
 direct monitor           # 打开PM2监控面板
+direct status            # 查看服务状态（包含定时器状态）
+tail -f logs/pm2-combined.log # 实时查看完整日志（推荐）
 tail -f logs/pm2-out.log # 实时查看输出日志
+```
+
+### Token刷新日志监控
+
+```bash
+# 实时监控刷新活动（推荐）
+tail -f logs/pm2-combined.log | grep -E "(🎯|✅.*刷新|❌.*刷新|Token刷新完成)"
+
+# 查看最近刷新历史
+grep -E "(🎯.*定时器触发|✅.*刷新成功|Token刷新完成)" logs/pm2-combined.log | tail -20
+
+# 查看刷新失败记录
+grep -E "(❌.*刷新|失败|🔒.*全局锁|🧊.*冷却)" logs/pm2-combined.log | tail -10
+
+# 按账户查看刷新状态
+grep "账户名" logs/pm2-combined.log | grep -E "(刷新|refresh)"
 ```
 
 ### 关键日志信息
 
+#### 业务日志
 - **账户池分配**：`assigned to account: [account] (slots: X/Y)`
 - **slot使用情况**：`using assigned account: [account] (slots: X/Y)`  
 - **请求限制检查**：`rate limit check passed: X/Y requests`
 - **黑名单检测**：`永久绑定的账户 [account] 已被加入黑名单，清除绑定`
 - **黑名单触发**：`Adding [account] to blacklist: [reason]`
 
+#### 刷新机制日志
+- **定时器触发**：`🎯 账户 [account] 定时器触发: 开始刷新`
+- **刷新成功**：`✅ 刷新成功，重置计数器，设置60秒全局成功锁`
+- **刷新完成**：`🎉 Token刷新完成，所有存储位置已立即同步: [account]`
+- **全局锁阻止**：`🔒 60秒内已有账户刷新成功，还需等待 X 秒`
+- **冷却期阻止**：`🧊 冷却中，还需等待 X 秒`
+- **下轮定时器**：`⏰ 为账户 [account] 设置定时器`
+
+### 定时器状态检查
+
+定时器状态已集成到 `direct status` 命令中：
+
+```bash
+direct status
+```
+
+显示信息包括：
+- **活跃定时器数量**：当前设置的自动刷新定时器个数
+- **下次刷新时间**：最近一个账户的刷新计划
+- **服务运行状态**：PM2进程、Redis、Nginx等状态
+
 ### 性能监控
 
 - 请求响应时间通常在800-1500ms
 - Medium级别无请求计数开销
 - High/Supreme级别有5小时窗口限制检查
+- 刷新过程通常在200-500ms内完成
 
 ## 安全注意事项
 
@@ -444,7 +485,7 @@ npm start               # 传统启动方式
 5. **分级请求限制**：High/Supreme有5小时窗口模型限制
 6. **实时监控工具**：`direct pool` 显示slot使用和黑名单状态
 7. **全局管理工具**：direct命令简化操作
-8. **自动token刷新**：过期前1分钟自动刷新OAuth token
+8. **自动token刷新**：过期前10分钟自动刷新OAuth token，全自动循环机制
 
 ### 最佳实践
 
@@ -474,3 +515,4 @@ npm start               # 传统启动方式
 - **实时监控**：使用 `direct pool` 随时查看系统状态
 - **分级目录结构**：便于账户管理和扩展
 - **系统已支持生产环境的高并发需求**
+- **自动化运维**：定时器自动循环，服务启动后无需人工干预

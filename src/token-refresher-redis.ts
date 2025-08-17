@@ -88,6 +88,29 @@ class TokenRefresherRedis {
     this.connectRedis();
   }
 
+  // Check if account file exists (简单的文件存在检查)
+  private checkAccountFileExists(accountName: string): boolean {
+    try {
+      const accountDir = path.join(__dirname, '..', 'account');
+      const accountFiles = this.scanAccountDirectory(accountDir);
+      
+      // 查找匹配的账户文件
+      for (const filePath of accountFiles) {
+        const fileName = path.basename(filePath, '.json');
+        if (fileName === accountName) {
+          return fs.existsSync(filePath);
+        }
+      }
+      
+      // 如果分级目录没找到，检查根目录
+      const rootAccountPath = path.join(__dirname, '..', 'account', `${accountName}.json`);
+      return fs.existsSync(rootAccountPath);
+    } catch (error) {
+      console.error('Error checking account file:', error);
+      return false;
+    }
+  }
+
   // Helper method to find account file path in subdirectories
   private findAccountFilePath(accountName: string): string | null {
     try {
@@ -298,10 +321,19 @@ class TokenRefresherRedis {
       const data = fs.readFileSync(accountPath, 'utf-8');
       const parsed = JSON.parse(data);
       if (parsed.claudeAiOauth) {
+        let expiresAt = parsed.claudeAiOauth.expiresAt;
+        
+        // 检测并修正时间戳格式问题（秒vs毫秒）
+        // 如果expiresAt看起来像秒级时间戳（10位数字），转换为毫秒
+        if (expiresAt < 10000000000) {
+          console.log(`[${getBeijingTime()}] ⚠️ 文件中检测到秒级时间戳 ${expiresAt}，转换为毫秒级`);
+          expiresAt = expiresAt * 1000;
+        }
+        
         return {
           accessToken: parsed.claudeAiOauth.accessToken,
           refreshToken: parsed.claudeAiOauth.refreshToken,
-          expiresAt: parsed.claudeAiOauth.expiresAt,
+          expiresAt: expiresAt,
           scopes: parsed.claudeAiOauth.scopes,
           subscriptionType: parsed.claudeAiOauth.subscriptionType
         };
@@ -442,7 +474,7 @@ class TokenRefresherRedis {
         const ttl = await this.redisClient.ttl(globalSuccessLockKey);
         console.log(`[${targetAccount}] 🔒 60秒内已有账户刷新成功，还需等待 ${ttl} 秒`);
         
-        // 被全局成功锁阻止也计为一次尝试
+        // 被全局成功锁阻止计为一次失败尝试
         await this.incrementAttemptCount(targetAccount, attemptCountKey, cooldownKey, now);
         return false;
       }
@@ -452,11 +484,9 @@ class TokenRefresherRedis {
     
     const credentials = await this.loadCredentials();
     if (!credentials) {
-      console.error('No credentials found');
-      // 无凭证也计为一次尝试
-      if (this.isConnected) {
-        await this.incrementAttemptCount(targetAccount, attemptCountKey, cooldownKey, now);
-      }
+      console.error('Failed to load credentials');
+      // 无法加载凭证，这是配置问题，不计入失败次数（上层已预先筛选过有效账户）
+      console.log(`[${targetAccount}] ⚠️ 无法加载凭证，配置问题，不计入失败次数`);
       return false;
     }
 
@@ -698,7 +728,7 @@ class TokenRefresherRedis {
       } else {
         console.error('No data in OAuth response');
         
-        // 刷新失败 - 增加计数器，设置冷却时间（不设置全局锁）
+        // 账户信息未成功刷新，计为失败
         if (this.isConnected) {
           await this.incrementAttemptCount(targetAccount, attemptCountKey, cooldownKey, now);
         }
@@ -712,7 +742,7 @@ class TokenRefresherRedis {
         console.error('Response data:', error.response.data);
       }
       
-      // 刷新失败 - 增加计数器，设置冷却时间（不设置全局锁）
+      // 账户信息未成功刷新，计为失败
       if (this.isConnected) {
         await this.incrementAttemptCount(targetAccount, attemptCountKey, cooldownKey, now);
       }
@@ -856,7 +886,15 @@ class TokenRefresherRedis {
         return;
       }
       
-      const expiresAt = parsed.claudeAiOauth.expiresAt;
+      let expiresAt = parsed.claudeAiOauth.expiresAt;
+      
+      // 检测并修正时间戳格式问题（秒vs毫秒）
+      // 如果expiresAt看起来像秒级时间戳（10位数字），转换为毫秒
+      if (expiresAt < 10000000000) {
+        console.log(`[${getBeijingTime()}] ⚠️ 检测到秒级时间戳 ${expiresAt}，转换为毫秒级`);
+        expiresAt = expiresAt * 1000;
+      }
+      
       const tenMinutesBeforeExpiry = expiresAt - 600000; // 过期前10分钟
       const now = Date.now();
       const minutesLeft = Math.floor((expiresAt - now) / 60000);
@@ -953,13 +991,8 @@ class TokenRefresherRedis {
             console.error(`[${getBeijingTime()}] ❌ 账户文件不存在: ${newFilePath}`);
           }
         } else {
-          console.error(`[${getBeijingTime()}] ❌ 账户 ${accountName} 刷新失败，1分钟后重试`);
-          
-          // 刷新失败，1分钟后重试
-          setTimeout(async () => {
-            console.log(`[${getBeijingTime()}] 🔄 账户 ${accountName} 重试刷新...`);
-            await this.scheduleAccountRefresh(accountName);
-          }, 60000);
+          console.error(`[${getBeijingTime()}] ❌ 账户 ${accountName} 刷新失败`);
+          console.log(`[${getBeijingTime()}] ℹ️ 将依赖冷却机制和下次定时器触发，不再设置1分钟重试`);
           
           // 更新状态为失败
           await this.saveAccountRefreshSchedule(accountName, {

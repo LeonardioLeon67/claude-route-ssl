@@ -332,7 +332,7 @@ async function proxyRequest(req: express.Request, res: express.Response) {
                 type: 'error',
                 error: {
                   type: 'authentication_error',
-                  message: `API key has expired on ${new Date(expiryTime).toISOString().split('T')[0]}. Please contact administrator for a new key.`
+                  message: `API key has expired on ${new Date(expiryTime).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '')}. Please contact administrator for a new key.`
                 }
               });
             }

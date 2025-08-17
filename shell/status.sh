@@ -174,7 +174,69 @@ else
 fi
 echo ""
 
-# Step 7: 资源使用情况
+# Step 7: Token刷新定时器状态
+echo "📋 Token刷新定时器状态:"
+echo "--------------------------------"
+# 获取所有刷新计划
+SCHEDULE_KEYS=$(redis-cli -p $REDIS_PORT keys "refresh_schedules:*" 2>/dev/null | sort)
+if [ -z "$SCHEDULE_KEYS" ]; then
+    echo "⚠️  没有设置刷新计划"
+else
+    ACTIVE_COUNT=0
+    for KEY in $SCHEDULE_KEYS; do
+        ACCOUNT=$(echo $KEY | cut -d':' -f2)
+        SCHEDULE=$(redis-cli -p $REDIS_PORT get "$KEY" 2>/dev/null)
+        
+        if [ ! -z "$SCHEDULE" ]; then
+            REFRESH_AT=$(echo $SCHEDULE | jq -r '.refreshAt' 2>/dev/null)
+            STATUS=$(echo $SCHEDULE | jq -r '.status' 2>/dev/null)
+            
+            if [ "$REFRESH_AT" != "null" ] && [ ! -z "$REFRESH_AT" ]; then
+                NOW=$(date +%s)
+                REFRESH_SEC=$((REFRESH_AT/1000))
+                REMAINING=$((REFRESH_SEC - NOW))
+                
+                if [ $REMAINING -gt 0 ]; then
+                    HOURS=$((REMAINING / 3600))
+                    MINUTES=$(((REMAINING % 3600) / 60))
+                    ((ACTIVE_COUNT++))
+                fi
+            fi
+        fi
+    done
+    echo "✅ 活跃定时器: ${ACTIVE_COUNT}个"
+    
+    # 显示最近的刷新计划
+    NEXT_REFRESH=""
+    MIN_REMAINING=999999999
+    for KEY in $SCHEDULE_KEYS; do
+        SCHEDULE=$(redis-cli -p $REDIS_PORT get "$KEY" 2>/dev/null)
+        if [ ! -z "$SCHEDULE" ]; then
+            REFRESH_AT=$(echo $SCHEDULE | jq -r '.refreshAt' 2>/dev/null)
+            ACCOUNT_NAME=$(echo $SCHEDULE | jq -r '.accountName' 2>/dev/null)
+            
+            if [ "$REFRESH_AT" != "null" ] && [ ! -z "$REFRESH_AT" ]; then
+                NOW=$(date +%s)
+                REFRESH_SEC=$((REFRESH_AT/1000))
+                REMAINING=$((REFRESH_SEC - NOW))
+                
+                if [ $REMAINING -gt 0 ] && [ $REMAINING -lt $MIN_REMAINING ]; then
+                    MIN_REMAINING=$REMAINING
+                    HOURS=$((REMAINING / 3600))
+                    MINUTES=$(((REMAINING % 3600) / 60))
+                    NEXT_REFRESH="$ACCOUNT_NAME (${HOURS}h${MINUTES}m后)"
+                fi
+            fi
+        fi
+    done
+    
+    if [ ! -z "$NEXT_REFRESH" ]; then
+        echo "⏰ 下次刷新: $NEXT_REFRESH"
+    fi
+fi
+echo ""
+
+# Step 8: 资源使用情况
 echo "📋 资源使用情况:"
 echo "--------------------------------"
 if pgrep -f "$PROJECT_NAME" > /dev/null; then
