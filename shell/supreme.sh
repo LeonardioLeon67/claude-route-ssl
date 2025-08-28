@@ -83,9 +83,8 @@ add_key_mapping() {
     local client_key=$1
     local client_name=$2
     local account_name=$3
-    local expiry_days=${4:-30}  # 默认30天有效期
     local current_time=$(date +%s000)  # 毫秒时间戳
-    local expiry_time=$(date -d "+${expiry_days} days" +%s000)  # 过期时间
+    # 未售出的产品不设置过期时间
     
     
     # 如果产品文件不存在，创建一个空的JSON文件
@@ -104,18 +103,17 @@ key = "$client_key"
 client_name = "$client_name"
 account_name = "$account_name"
 timestamp = $current_time
-expiry_timestamp = $expiry_time
 PRODUCT_FILE = "$PRODUCT_FILE"
 
 # 连接Redis
 try:
-    r = redis.Redis(host='localhost', port=$REDIS_PORT, decode_responses=True)
+    r = redis.Redis(host='127.0.0.1', port=$REDIS_PORT, db=0, decode_responses=True)
     r.ping()
     redis_connected = True
     print(f"Connected to Redis on port $REDIS_PORT")
-except:
+except Exception as e:
     redis_connected = False
-    print("Warning: Could not connect to Redis, will only save to file")
+    print(f"Warning: Could not connect to Redis: {e}")
 
 # 加载产品文件
 try:
@@ -153,15 +151,15 @@ if redis_connected:
             "tier": "supreme",
             "created_at": timestamp,
             "created_date": datetime.now(timezone(timedelta(hours=8))).isoformat(),
-            "expires_at": str(expiry_timestamp),
-            "expires_date": datetime.fromtimestamp(expiry_timestamp/1000).isoformat(),
+            "expires_at": "",
+            "expires_date": "",
             "active": "true",
             "status": "unsold",  # 添加销售状态
             # Supreme级别分模型限制
-            "opus_4_per_5_hours": "60",  # Opus 4.1 每5小时60次
+            "opus_4_per_5_hours": "15",  # Opus 4.1 每5小时15次
             "opus_4_current_window_start": str(timestamp),
             "opus_4_current_window_requests": "0",
-            "sonnet_4_per_5_hours": "240",  # Sonnet 4 每5小时240次  
+            "sonnet_4_per_5_hours": "75",  # Sonnet 4 每5小时75次  
             "sonnet_4_current_window_start": str(timestamp),
             "sonnet_4_current_window_requests": "0"
         })
@@ -197,16 +195,23 @@ if redis_connected:
             "sold_at": "",
             "order_no": "",
             "created_at": timestamp,
-            "expires_at": str(expiry_timestamp)
+            "expires_at": ""
         })
         
         print(f"Key saved to Redis under client_keys:{key}")
         print(f"Key added to account {account_name} in Redis")
         print(f"Supreme product record saved to Redis under supreme_products:{key}")
     except Exception as e:
-        print(f"Warning: Could not save to Redis: {e}")
+        print(f"Error: Could not save to Redis: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
-print("Success")
+if redis_connected:
+    print("Success: Key registered to both file and Redis")
+else:
+    print("Partial success: Key registered to file only (Redis unavailable)")
+    sys.exit(1)
 EOF
     
     if [ $? -eq 0 ]; then
@@ -349,8 +354,8 @@ main() {
         echo -e "${GREEN}Product Name:${NC} $client_name"
         echo -e "${GREEN}Product Key:${NC}  $new_key"
         echo -e "${GREEN}Status:${NC}       unsold"
-        echo -e "${GREEN}Created:${NC}      $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S') (北京时间)"
-        echo -e "${GREEN}Expires:${NC}      $(TZ='Asia/Shanghai' date -d "+${expiry_days:-30} days" '+%Y-%m-%d %H:%M:%S') (北京时间)"
+        echo -e "${GREEN}Created:${NC}      $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
+        echo -e "${GREEN}Expires:${NC}      $(TZ='Asia/Shanghai' date -d "+${expiry_days:-30} days" '+%Y-%m-%d %H:%M:%S')"
         echo -e "${GREEN}Valid Days:${NC}   ${expiry_days:-30} days"
         echo -e "${GREEN}Limits:${NC}       Opus 4.1: 60/5hours, Sonnet 4: 240/5hours"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -377,19 +382,19 @@ main() {
         echo ""
         echo "Client Configuration:"
         echo "─────────────────────────────────────────────────────────────────────"
-        echo "Base URL: https://direct.816981.xyz"
+        echo "Base URL: https://api.justprompt.pro"
         echo "API Key:  $new_key"
         echo ""
         echo "Usage Examples:"
         echo "─────────────────────────────────────────────────────────────────────"
         echo "1. Using x-api-key header:"
-        echo "   curl -X POST https://direct.816981.xyz/v1/messages \\"
+        echo "   curl -X POST https://api.justprompt.pro/v1/messages \\"
         echo "     -H \"x-api-key: $new_key\" \\"
         echo "     -H \"Content-Type: application/json\" \\"
         echo "     -d '{\"model\": \"claude-opus-4-20250101\", ...}'"
         echo ""
         echo "2. Using Authorization header:"
-        echo "   curl -X POST https://direct.816981.xyz/v1/messages \\"
+        echo "   curl -X POST https://api.justprompt.pro/v1/messages \\"
         echo "     -H \"Authorization: Bearer $new_key\" \\"
         echo "     -H \"Content-Type: application/json\" \\"
         echo "     -d '{\"model\": \"claude-sonnet-4-20250514\", ...}'"

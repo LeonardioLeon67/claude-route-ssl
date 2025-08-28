@@ -61,12 +61,12 @@ fi
 
 # Step 3: 检查nginx配置并启动
 echo "📋 Step 3: 检查nginx配置..."
-NGINX_CONF="/home/leon/claude-route-ssl/claude-route-ssl/nginx/conf.d/direct.816981.xyz.conf"
+NGINX_CONF="/home/leon/claude-route-ssl/claude-route-ssl/nginx/api.justprompt.pro.conf"
 
 if [ -f "$NGINX_CONF" ]; then
     # 链接nginx配置
-    sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-available/direct.816981.xyz.conf
-    sudo ln -sf /etc/nginx/sites-available/direct.816981.xyz.conf /etc/nginx/sites-enabled/direct.816981.xyz.conf
+    sudo ln -sf "$NGINX_CONF" /etc/nginx/sites-available/api.justprompt.pro.conf
+    sudo ln -sf /etc/nginx/sites-available/api.justprompt.pro.conf /etc/nginx/sites-enabled/api.justprompt.pro.conf
     
     # 测试nginx配置
     if sudo nginx -t; then
@@ -98,7 +98,7 @@ fi
 
 # 检查HTTPS访问
 echo "🔍 检查HTTPS访问:"
-if curl -s -o /dev/null -w "%{http_code}" https://direct.816981.xyz | grep -q "401"; then
+if curl -s -o /dev/null -w "%{http_code}" https://api.justprompt.pro | grep -q "401"; then
     echo "✅ HTTPS访问正常"
 else
     echo "⚠️  HTTPS访问可能有问题"
@@ -108,7 +108,7 @@ echo ""
 echo "🎉 Claude Route SSL 项目启动完成！"
 echo "================================"
 echo "✅ PM2进程: $PROJECT_NAME (端口8080)"
-echo "✅ Nginx代理: https://direct.816981.xyz"
+echo "✅ Nginx代理: https://api.justprompt.pro"
 echo "✅ 项目目录: $PROJECT_DIR"
 echo ""
 echo "📊 查看状态: ./status.sh"

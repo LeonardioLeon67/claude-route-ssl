@@ -77,7 +77,7 @@ Internet → Nginx (443/80) → Claude Route SSL (8080) → Redis (6380)
 ### 配置文件更新
 - ✅ **tsconfig.json**: 排除 `forward-monitor.ts` 测试文件
 - ✅ **ecosystem.config.js**: PM2配置优化
-- ✅ **nginx配置**: direct.816981.xyz 反向代理
+- ✅ **nginx配置**: api.justprompt.pro 反向代理
 
 ### 端口配置
 - **8080**: Claude Route SSL主服务
@@ -96,7 +96,7 @@ Internet → Nginx (443/80) → Claude Route SSL (8080) → Redis (6380)
    ✅ HTTPS外部访问 - 响应时间 0.051s
 
 🎉 所有服务运行正常！
-🔗 访问地址: https://direct.816981.xyz
+🔗 访问地址: https://api.justprompt.pro
 ```
 
 ## 🚦 使用流程
@@ -176,5 +176,5 @@ cd /home/leon/claude-route-ssl/claude-route-ssl/shell
 - 📊 状态监控
 - 🛑 安全停止
 
-**访问地址**: https://direct.816981.xyz
+**访问地址**: https://api.justprompt.pro
 **管理目录**: `/home/leon/claude-route-ssl/claude-route-ssl/shell/`

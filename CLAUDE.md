@@ -86,20 +86,22 @@ curl -X POST http://YOUR_SERVER:8080/v1/messages \
 
 ### 概述
 
-系统支持三个级别的账户池，每个级别有不同的slot配置和请求限制：
+系统支持四个级别的账户池，每个级别有不同的slot配置和请求限制：
 
-- **Medium级别**：每账户1个slot，无请求次数限制
-- **High级别**：每账户4个slot，有模型请求限制  
-- **Supreme级别**：每账户3个slot，有更高的模型请求限制
+- **Trial级别**：每账户7个slot，只能使用Sonnet模型（每5小时42次限制），1天有效期
+- **Medium级别**：每账户7个slot，只能使用Sonnet模型（每5小时42次限制），30天有效期
+- **High级别**：每账户3个slot，有模型请求限制  
+- **Supreme级别**：每账户2个slot，有更高的模型请求限制
 
 ### 目录结构
 
 账户按级别分目录存储：
 ```
 /account/
-├── medium/     # Medium级别账户 (每账户1个slot)
-├── high/       # High级别账户 (每账户4个slot)
-└── supreme/    # Supreme级别账户 (每账户3个slot)
+├── trial/      # Trial级别账户 (每账户7个slot，只能用Sonnet，42次/5小时，1天有效)
+├── medium/     # Medium级别账户 (每账户7个slot，只能用Sonnet，42次/5小时，30天有效)
+├── high/       # High级别账户 (每账户3个slot)
+└── supreme/    # Supreme级别账户 (每账户2个slot)
 ```
 
 ### 生成产品密钥
@@ -128,26 +130,40 @@ cd shell && ./supreme.sh [account-name]  # 绑定到指定Supreme账户
 
 ### 各级别详细配置
 
+#### Trial级别
+- **Slot配置**：每个账户7个位置
+- **请求限制**：
+  - 只允许使用Sonnet系列模型
+  - Sonnet系列：每5小时42次
+  - 其他模型：不允许使用
+- **有效期**：1天
+- **适用场景**：试用体验
+- **账户目录**：`/account/trial/`
+
 #### Medium级别
-- **Slot配置**：每个账户1个位置
-- **请求限制**：无限制
-- **适用场景**：轻度使用、开发测试
+- **Slot配置**：每个账户7个位置
+- **请求限制**：
+  - 只允许使用Sonnet系列模型
+  - Sonnet系列：每5小时42次
+  - 其他模型：不允许使用
+- **有效期**：30天
+- **适用场景**：标准使用
 - **账户目录**：`/account/medium/`
 
 #### High级别  
-- **Slot配置**：每个账户4个位置
+- **Slot配置**：每个账户3个位置
 - **请求限制**：
-  - Opus系列：每5小时45次
-  - Sonnet系列：每5小时180次
+  - Opus系列：每5小时10次
+  - Sonnet系列：每5小时50次
   - 其他模型：无限制
 - **适用场景**：中等强度使用
 - **账户目录**：`/account/high/`
 
 #### Supreme级别
-- **Slot配置**：每个账户3个位置  
+- **Slot配置**：每个账户2个位置  
 - **请求限制**：
-  - Opus系列：每5小时60次
-  - Sonnet系列：每5小时240次
+  - Opus系列：每5小时15次
+  - Sonnet系列：每5小时75次
   - 其他模型：无限制
 - **适用场景**：高强度使用
 - **账户目录**：`/account/supreme/`
@@ -156,7 +172,7 @@ cd shell && ./supreme.sh [account-name]  # 绑定到指定Supreme账户
 
 - **Opus系列**：模型名包含`opus`的所有模型（如 claude-opus-4、claude-3-opus、opus-latest等）
 - **Sonnet系列**：模型名包含`sonnet`的所有模型（如 claude-sonnet-4、claude-3-sonnet、sonnet-preview等）
-- **其他模型**：无限制（如 claude-3-5-haiku、claude-instant等）
+- **其他模型**：Haiku、Instant等（Trial和Medium级别不可用）
 
 ### 账户池分配机制
 
@@ -191,6 +207,7 @@ direct high       # 生成High级别产品密钥（账户池）
 direct supreme    # 生成Supreme级别产品密钥（账户池）
 direct pool       # 查看账户池状态和slot使用情况
 direct recover    # 恢复黑名单账户：direct recover <account_name>
+direct sync       # 手动触发完全同步机制
 direct logs       # 查看PM2日志
 direct monitor    # 打开PM2监控面板
 direct help       # 显示帮助信息
@@ -254,6 +271,10 @@ direct help       # 显示帮助信息
 
 ### 账户池相关问题
 
+#### "Trial/Medium tier can only use Sonnet models"
+- Trial和Medium级别只能使用包含"sonnet"的模型
+- 如需使用其他模型（如Opus、Haiku等），请升级到High或Supreme级别
+
 #### "All [Tier] accounts are at capacity"
 - 说明该级别所有账户都达到了slot上限
 - 等待其他客户端释放slot（密钥过期或主动释放）
@@ -269,7 +290,7 @@ direct help       # 显示帮助信息
 #### "OAuth token has expired"
 - 编辑对应级别目录下的账户JSON文件更新token
 - 重启服务器以应用新token：`direct restart`
-- 系统会自动刷新即将过期的token（过期前10分钟）
+- 系统会自动刷新即将过期的token（过期前1分钟）
 
 ### 限制相关问题
 
@@ -355,15 +376,24 @@ direct help       # 显示帮助信息
 #### 🧹 同步操作详解
 1. **文件系统扫描**：递归扫描所有级别目录(medium/high/supreme)下的.json文件
 2. **Redis数据清理**：删除不存在于文件系统的账户的所有Redis记录
+   - 清理slot计数：`${tier}_pool:slots:${account}`
+   - 清理黑名单记录：`account_blacklist:${tier}:${account}`
+   - 清理永久绑定：从`${tier}_pool:permanent_binding`中移除不存在账户的绑定
 3. **定时器重置**：清除现有定时器，为所有文件系统账户重新设置刷新定时器
 4. **完全一致性**：确保Redis调度记录与文件系统账户完全匹配
 
+#### 🔧 手动同步命令
+```bash
+direct sync       # 手动触发完全同步（可立即查看效果）
+```
+
 #### ⚡ 关键优势
 - **数据一致性**：Redis与文件系统100%同步，杜绝不一致状态
-- **自动清理**：删除的账户文件会自动清理对应的Redis数据
+- **自动清理**：删除的账户文件会自动清理对应的Redis数据和永久绑定关系
 - **新账户检测**：新添加的账户文件会自动设置刷新定时器
 - **定期维护**：每4小时自动执行，无需人工干预
 - **资源优化**：清理无效数据，避免资源浪费
+- **即时生效**：支持手动触发，立即查看同步效果
 
 ## 支持的Claude模型
 
@@ -513,15 +543,15 @@ npm start               # 传统启动方式
 
 ### 核心特性
 
-1. **分级账户池系统**：Medium(1)/High(4)/Supreme(3) slot配置
+1. **分级账户池系统**：Trial(7)/Medium(7)/High(3)/Supreme(2) slot配置
 2. **智能负载均衡**：基于slot占用的动态分配算法
 3. **永久绑定机制**：密钥与账户永久绑定，不会自动轮换
 4. **黑名单故障转移**：账户故障时自动重新分配，保证服务连续性
 5. **分级请求限制**：High/Supreme有5小时窗口模型限制
 6. **实时监控工具**：`direct pool` 显示slot使用和黑名单状态
 7. **全局管理工具**：direct命令简化操作
-8. **自动token刷新**：过期前10分钟自动刷新OAuth token
-9. **完全同步机制**：每4小时扫描文件系统，确保Redis与账户文件夹完全一致
+8. **自动token刷新**：过期前1分钟自动刷新OAuth token
+9. **完全同步机制**：每4小时扫描文件系统，确保Redis与账户文件夹完全一致，支持手动触发
 
 ### 最佳实践
 

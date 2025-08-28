@@ -41,7 +41,19 @@ show_tier_status() {
         return
     fi
     
-    echo -e "${tier_color}=== ${tier^^} TIER ACCOUNTS (${max_slots} slots per account) ===${NC}"
+    # 添加级别特定说明
+    local tier_info=""
+    if [ "$tier" = "trial" ]; then
+        tier_info=" | Sonnet only, 42/5h, 1 day"
+    elif [ "$tier" = "medium" ]; then
+        tier_info=" | Sonnet only, 42/5h, 30 days"
+    elif [ "$tier" = "high" ]; then
+        tier_info=" | All models, Opus:10/5h, Sonnet:50/5h, 30 days"
+    elif [ "$tier" = "supreme" ]; then
+        tier_info=" | All models, Opus:15/5h, Sonnet:75/5h, 30 days"
+    fi
+    
+    echo -e "${tier_color}=== ${tier^^} TIER ACCOUNTS (${max_slots} slots/account${tier_info}) ===${NC}"
     echo ""
     
     local total_accounts=0
@@ -58,7 +70,6 @@ show_tier_status() {
     done
     
     if [ "$has_accounts" = false ]; then
-        echo "  ${YELLOW}No accounts found in $tier directory${NC}"
         echo ""
         return
     fi
@@ -128,9 +139,10 @@ show_tier_status() {
 }
 
 # 显示所有级别的状态
-show_tier_status "medium" "$GREEN" 1
-show_tier_status "high" "$PURPLE" 4  
-show_tier_status "supreme" "$CYAN" 3
+show_tier_status "trial" "$YELLOW" 7
+show_tier_status "medium" "$GREEN" 7
+show_tier_status "high" "$PURPLE" 3  
+show_tier_status "supreme" "$CYAN" 2
 
 # 显示黑名单账户详细信息
 echo ""
@@ -138,12 +150,13 @@ echo -e "${RED}🚫 Blacklisted Accounts:${NC}"
 echo "─────────────────────────────────────────────────────────────────────"
 
 blacklist_found=false
-for tier in medium high supreme; do
+for tier in trial medium high supreme; do
     # 确定级别颜色和slot配置
     case $tier in
-        "medium") tier_color=$GREEN; max_slots=1 ;;
-        "high") tier_color=$PURPLE; max_slots=4 ;;
-        "supreme") tier_color=$CYAN; max_slots=3 ;;
+        "trial") tier_color=$YELLOW; max_slots=7 ;;
+        "medium") tier_color=$GREEN; max_slots=7 ;;
+        "high") tier_color=$PURPLE; max_slots=3 ;;
+        "supreme") tier_color=$CYAN; max_slots=2 ;;
     esac
     
     # 获取该级别的黑名单账户
@@ -183,7 +196,7 @@ echo "────────────────────────�
 # 显示刷新失败达到上限的账户
 refresh_failed_count=0
 
-for tier in medium high supreme; do
+for tier in trial medium high supreme; do
     # 获取所有刷新尝试记录
     attempt_keys=$(redis-cli -p $REDIS_PORT keys "refresh_attempts:*" 2>/dev/null)
     
@@ -198,7 +211,10 @@ for tier in medium high supreme; do
                 
                 # 检查账户属于哪个级别（通过检查目录）
                 account_tier=""
-                if [ -f "../account/medium/${account_name}.json" ]; then
+                if [ -f "../account/trial/${account_name}.json" ]; then
+                    account_tier="trial"
+                    tier_color=$YELLOW
+                elif [ -f "../account/medium/${account_name}.json" ]; then
                     account_tier="medium"
                     tier_color=$GREEN
                 elif [ -f "../account/high/${account_name}.json" ]; then

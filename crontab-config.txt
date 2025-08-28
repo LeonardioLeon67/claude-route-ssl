@@ -1,0 +1,29 @@
+# Claude Route SSL 定时任务配置
+# 更新产品过期时间 - 每天北京时间1:00和13:00执行
+# 当前系统时区：Europe/Amsterdam (CEST, UTC+2)
+# 北京时间 (UTC+8) 比 CEST (UTC+2) 快6小时
+
+# 时间转换：
+# 北京时间1:00 = CEST 19:00（前一天）
+# 北京时间13:00 = CEST 7:00
+
+# CEST时区配置（当前系统）：
+0 19 * * * /usr/bin/python3 /home/leon/claude-route-ssl/claude-route-ssl/update-expire-dates.py >> /home/leon/claude-route-ssl/claude-route-ssl/logs/cron.log 2>&1
+0 7 * * * /usr/bin/python3 /home/leon/claude-route-ssl/claude-route-ssl/update-expire-dates.py >> /home/leon/claude-route-ssl/claude-route-ssl/logs/cron.log 2>&1
+
+# 如果系统已经是北京时间（CST/Asia/Shanghai）：
+# 0 1 * * * /usr/bin/python3 /home/leon/claude-route-ssl/claude-route-ssl/update-expire-dates.py >> /home/leon/claude-route-ssl/claude-route-ssl/logs/cron.log 2>&1
+# 0 13 * * * /usr/bin/python3 /home/leon/claude-route-ssl/claude-route-ssl/update-expire-dates.py >> /home/leon/claude-route-ssl/claude-route-ssl/logs/cron.log 2>&1
+
+# 安装方法：
+# 1. 查看当前系统时区：timedatectl 或 date
+# 2. 根据时区选择上面对应的配置
+# 3. 编辑crontab：crontab -e
+# 4. 复制对应的配置行（去掉注释#）
+# 5. 保存退出
+
+# 查看crontab状态：
+# crontab -l
+
+# 手动测试脚本：
+# python3 /home/leon/claude-route-ssl/claude-route-ssl/update-expire-dates.py

@@ -24,7 +24,7 @@ Internet → Nginx (443/80) → Claude Route SSL (8080) → Redis (6380) → Cla
 
 ### 核心组件
 1. **PM2进程管理** - claude-proxy (端口8080)
-2. **Nginx反向代理** - direct.816981.xyz → localhost:8080
+2. **Nginx反向代理** - api.justprompt.pro → localhost:8080
 3. **Redis数据存储** - 端口6380 (账户和密钥管理)
 4. **SSL证书** - Let's Encrypt (自动续签)
 
@@ -76,7 +76,7 @@ claude-route-ssl/
 - **80/443**: Nginx HTTP/HTTPS
 
 ### 域名配置
-- **主域名**: direct.816981.xyz
+- **主域名**: api.justprompt.pro
 - **SSL证书**: Let's Encrypt 自动续签
 - **HTTP**: 自动重定向到HTTPS
 
@@ -148,7 +148,7 @@ pm2 show claude-proxy        # 详细信息
 ### 状态检查
 ```bash
 ./status.sh                  # 完整状态检查
-curl -I https://direct.816981.xyz  # 快速连接测试
+curl -I https://api.justprompt.pro  # 快速连接测试
 ```
 
 ## 🔄 自动化功能
@@ -209,7 +209,7 @@ ss -tlnp | grep -E "(8080|6380|443)"
 ps aux | grep -E "(claude-proxy|redis-server|nginx)"
 
 # 测试连接
-curl -v https://direct.816981.xyz
+curl -v https://api.justprompt.pro
 
 # 检查系统资源
 top -p $(pgrep -d, -f "claude-proxy\|redis-server")

@@ -31,6 +31,7 @@ show_help() {
     echo -e "  ${YELLOW}restart${NC}                重启Claude Route SSL项目"
     echo -e "  ${YELLOW}stop${NC}                   停止Claude Route SSL项目"
     echo -e "  ${YELLOW}status${NC}                 查看项目状态"
+    echo -e "  ${YELLOW}trial${NC}                  生成Trial级别产品密钥（1天有效期）"
     echo -e "  ${YELLOW}medium <account>${NC}       生成Medium级别产品密钥"
     echo -e "  ${YELLOW}high <account>${NC}         生成High级别产品密钥"
     echo -e "  ${YELLOW}supreme <account>${NC}      生成Supreme级别产品密钥"
@@ -44,6 +45,7 @@ show_help() {
     echo -e "${GREEN}Examples:${NC}"
     echo -e "  direct run                   # 启动项目"
     echo -e "  direct status                # 查看状态"
+    echo -e "  direct trial                 # 生成Trial密钥（1天有效期）"
     echo -e "  direct medium testuser       # 生成Medium密钥"
     echo -e "  direct high production       # 生成High密钥"
     echo -e "  direct supreme premium       # 生成Supreme密钥"
@@ -52,7 +54,7 @@ show_help() {
     echo ""
     echo -e "${GREEN}Project Info:${NC}"
     echo -e "  Project Directory: ${BLUE}$PROJECT_DIR${NC}"
-    echo -e "  HTTPS Access: ${BLUE}https://direct.816981.xyz${NC}"
+    echo -e "  HTTPS Access: ${BLUE}https://api.justprompt.pro${NC}"
     echo -e "  Local Access: ${BLUE}http://127.0.0.1:8080${NC}"
     echo ""
 }
@@ -154,6 +156,10 @@ main() {
         "status")
             echo -e "${CYAN}📊 查看 $PROJECT_NAME 状态${NC}"
             run_script "status.sh"
+            ;;
+        "trial")
+            echo -e "${YELLOW}🎫 生成 Trial 级别产品密钥（1天有效期）${NC}"
+            run_script "trial.sh"
             ;;
         "medium")
             if [ -z "$2" ]; then

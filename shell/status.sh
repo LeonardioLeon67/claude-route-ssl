@@ -73,8 +73,8 @@ if systemctl is-active nginx > /dev/null 2>&1; then
     echo "✅ Nginx服务运行中"
     
     # 检查配置
-    if [ -L "/etc/nginx/sites-enabled/direct.816981.xyz.conf" ]; then
-        echo "✅ 项目配置已启用: direct.816981.xyz"
+    if [ -L "/etc/nginx/sites-enabled/api.justprompt.pro.conf" ]; then
+        echo "✅ 项目配置已启用: api.justprompt.pro"
     else
         echo "⚠️  项目配置未启用"
     fi
@@ -137,9 +137,9 @@ else
 fi
 
 # 测试HTTPS
-if curl -s -o /dev/null -w "%{http_code}" https://direct.816981.xyz 2>/dev/null | grep -q "401\|200"; then
-    RESPONSE_TIME=$(curl -s -o /dev/null -w "%{time_total}" https://direct.816981.xyz 2>/dev/null || echo "N/A")
-    echo "✅ HTTPS访问正常 (direct.816981.xyz) - ${RESPONSE_TIME}s"
+if curl -s -o /dev/null -w "%{http_code}" https://api.justprompt.pro 2>/dev/null | grep -q "401\|200"; then
+    RESPONSE_TIME=$(curl -s -o /dev/null -w "%{time_total}" https://api.justprompt.pro 2>/dev/null || echo "N/A")
+    echo "✅ HTTPS访问正常 (api.justprompt.pro) - ${RESPONSE_TIME}s"
 else
     echo "❌ HTTPS访问失败"
 fi
@@ -148,7 +148,7 @@ echo ""
 # Step 6: SSL证书状态
 echo "📋 SSL证书状态:"
 echo "--------------------------------"
-CERT_PATH="/etc/letsencrypt/live/direct.816981.xyz/fullchain.pem"
+CERT_PATH="/etc/letsencrypt/live/api.justprompt.pro/fullchain.pem"
 if [ -f "$CERT_PATH" ]; then
     if command -v openssl &> /dev/null; then
         CERT_EXPIRY=$(sudo openssl x509 -enddate -noout -in "$CERT_PATH" 2>/dev/null | cut -d= -f2)
@@ -281,7 +281,7 @@ if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8080 2>/dev/null | gr
     HTTP_OK="✅"
 fi
 
-if curl -s -o /dev/null -w "%{http_code}" https://direct.816981.xyz 2>/dev/null | grep -q "401\|200"; then
+if curl -s -o /dev/null -w "%{http_code}" https://api.justprompt.pro 2>/dev/null | grep -q "401\|200"; then
     HTTPS_OK="✅"
 fi
 
@@ -295,7 +295,7 @@ echo "   $HTTPS_OK HTTPS外部访问"
 echo ""
 if [[ "$PM2_OK" == "✅" && "$REDIS_OK" == "✅" && "$NGINX_OK" == "✅" && "$HTTP_OK" == "✅" && "$HTTPS_OK" == "✅" ]]; then
     echo "🎉 所有服务运行正常！"
-    echo "🔗 访问地址: https://direct.816981.xyz"
+    echo "🔗 访问地址: https://api.justprompt.pro"
 else
     echo "⚠️  部分服务存在问题"
     echo ""

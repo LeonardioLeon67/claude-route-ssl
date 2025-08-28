@@ -193,4 +193,4 @@ direct logs
 - 🔄 **重启**: `direct restart`
 - 🔑 **密钥**: `direct medium <账户名>`
 
-**项目访问地址**: https://direct.816981.xyz
+**项目访问地址**: https://api.justprompt.pro

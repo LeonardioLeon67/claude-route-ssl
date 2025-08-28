@@ -18,7 +18,7 @@ cd /home/leon/claude-route-ssl/claude-route-ssl/shell
 ```
 
 ### 4️⃣ 访问服务
-- **HTTPS**: https://direct.816981.xyz
+- **HTTPS**: https://api.justprompt.pro
 - **本地**: http://127.0.0.1:8080
 
 ## 🔄 日常管理命令
@@ -43,7 +43,7 @@ pm2 monit
 pm2 logs claude-proxy
 
 # 测试HTTPS连接
-curl -I https://direct.816981.xyz
+curl -I https://api.justprompt.pro
 ```
 
 ## 🔑 生成客户端密钥
@@ -95,6 +95,6 @@ pkill -f "redis-server.*6380"
 
 ---
 
-**快速访问**: https://direct.816981.xyz  
+**快速访问**: https://api.justprompt.pro  
 **本地测试**: http://127.0.0.1:8080  
 **状态检查**: `./status.sh`

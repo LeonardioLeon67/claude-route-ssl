@@ -207,5 +207,5 @@ ls -la /home/leon/claude-route-ssl/claude-route-ssl/shell/
 
 现在你可以在任何目录下使用 `direct` 命令管理 Claude Route SSL 项目了！
 
-**访问地址**: https://direct.816981.xyz  
+**访问地址**: https://api.justprompt.pro  
 **本地测试**: http://127.0.0.1:8080

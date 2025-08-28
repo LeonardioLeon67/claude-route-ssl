@@ -106,7 +106,7 @@ direct high 'account_name'
 
 ## 🌐 访问信息
 
-- **HTTPS访问**: https://direct.816981.xyz
+- **HTTPS访问**: https://api.justprompt.pro
 - **本地访问**: http://127.0.0.1:8080
 - **项目目录**: `/home/leon/claude-route-ssl/claude-route-ssl`
 

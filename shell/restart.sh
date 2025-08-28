@@ -91,7 +91,7 @@ fi
 
 # 检查HTTPS访问
 echo "🔍 检查HTTPS访问:"
-if curl -s -o /dev/null -w "%{http_code}" https://direct.816981.xyz | grep -q "401"; then
+if curl -s -o /dev/null -w "%{http_code}" https://api.justprompt.pro | grep -q "401"; then
     echo "✅ HTTPS访问正常"
 else
     echo "⚠️  HTTPS访问可能有问题"
@@ -101,7 +101,7 @@ echo ""
 echo "🎉 Claude Route SSL 项目重启完成！"
 echo "================================"
 echo "✅ PM2进程: $PROJECT_NAME (已重启)"
-echo "✅ Nginx代理: https://direct.816981.xyz (已重载)"
+echo "✅ Nginx代理: https://api.justprompt.pro (已重载)"
 echo "✅ 项目目录: $PROJECT_DIR"
 echo ""
 echo "📊 查看状态: ./status.sh"

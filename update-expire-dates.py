@@ -3,8 +3,10 @@
 
 """
 定时任务脚本：更新产品过期时间
-每周日凌晨2点执行
-根据soldAt时间（北京时间）+ 30天设置过期时间
+每天北京时间1:00和13:00执行
+根据soldAt时间（北京时间）设置过期时间
+Trial级别：soldAt + 1天
+其他级别：soldAt + 30天
 """
 
 import json
@@ -31,7 +33,7 @@ BEIJING_TZ = pytz.timezone('Asia/Shanghai')
 
 def parse_sold_at(sold_at_str):
     """解析soldAt时间字符串（北京时间）"""
-    if sold_at_str == "NULL" or sold_at_str is None:
+    if sold_at_str is None:
         return None
     
     try:
@@ -56,19 +58,27 @@ def update_product_file(file_path, tier):
         
         # 遍历所有产品
         for key, product in products.items():
-            # 只处理已售出的产品
-            if product.get('status') == 'sold' and product.get('soldAt') != "NULL":
-                sold_at = parse_sold_at(product.get('soldAt'))
+            sold_at_value = product.get('soldAt')
+            
+            # 如果soldAt为None（JSON的null），跳过不处理，保持原样
+            if sold_at_value is None:
+                # 不做任何修改，保持原有的null状态
+                continue
+                
+            # 只处理有有效soldAt时间的产品
+            if product.get('status') == 'sold' and sold_at_value:
+                sold_at = parse_sold_at(sold_at_value)
                 
                 if sold_at:
-                    # 计算过期时间（soldAt + 30天）
-                    expire_dt = sold_at + timedelta(days=30)
+                    # 计算过期时间（Trial为1天，其他为30天）
+                    days_to_add = 1 if tier == 'trial' else 30
+                    expire_dt = sold_at + timedelta(days=days_to_add)
                     
                     # 转换为时间戳（毫秒）
                     expire_timestamp = int(expire_dt.timestamp() * 1000)
                     
                     # 格式化为北京时间字符串
-                    expire_date_str = expire_dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%dT%H:%M:%S")
+                    expire_date_str = expire_dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
                     
                     # 更新产品信息
                     product['expiresAt'] = expire_timestamp
@@ -76,11 +86,6 @@ def update_product_file(file_path, tier):
                     
                     updated_count += 1
                     logging.info(f"Updated {tier} key {key[:20]}...: soldAt={product['soldAt']}, expiresDate={expire_date_str}")
-            else:
-                # 未售出的产品，保持expiresAt和expiresDate为null
-                if product.get('soldAt') == "NULL" or product.get('soldAt') is None:
-                    product['expiresAt'] = None
-                    product['expiresDate'] = None
         
         # 保存更新后的文件
         with open(file_path, 'w') as f:
@@ -106,15 +111,21 @@ def update_redis_products(tier):
         
         for redis_key in product_keys:
             product_data = r.hgetall(redis_key)
+            sold_at_value = product_data.get('soldAt')
             
-            if product_data and product_data.get('status') == 'sold':
-                sold_at = parse_sold_at(product_data.get('soldAt'))
+            # 如果soldAt为None或空字符串（Redis中的None表现为空字符串），跳过不处理
+            if not sold_at_value:
+                continue
+                
+            if product_data and product_data.get('status') == 'sold' and sold_at_value:
+                sold_at = parse_sold_at(sold_at_value)
                 
                 if sold_at:
-                    # 计算过期时间
-                    expire_dt = sold_at + timedelta(days=30)
+                    # 计算过期时间（Trial为1天，其他为30天）
+                    days_to_add = 1 if tier == 'trial' else 30
+                    expire_dt = sold_at + timedelta(days=days_to_add)
                     expire_timestamp = int(expire_dt.timestamp() * 1000)
-                    expire_date_str = expire_dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%dT%H:%M:%S")
+                    expire_date_str = expire_dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
                     
                     # 更新Redis
                     r.hset(redis_key, mapping={
@@ -139,12 +150,16 @@ def update_client_keys_in_redis():
         
         # 读取所有产品文件获取soldAt和status信息
         all_products = {}
-        for tier in ['medium', 'high', 'supreme']:
+        tier_map = {}  # 记录每个key属于哪个tier
+        for tier in ['trial', 'medium', 'high', 'supreme']:
             file_path = os.path.join(PRODUCT_DIR, f'{tier}.json')
             if os.path.exists(file_path):
                 with open(file_path, 'r') as f:
                     products = json.load(f)
                     all_products.update(products)
+                    # 记录每个key的tier
+                    for key in products:
+                        tier_map[key] = tier
         
         # 获取所有client_keys
         pattern = "client_keys:*"
@@ -159,15 +174,24 @@ def update_client_keys_in_redis():
             # 查找对应的产品信息
             if actual_key in all_products:
                 product = all_products[actual_key]
+                sold_at_value = product.get('soldAt')
                 
-                if product.get('status') == 'sold' and product.get('soldAt') != "NULL":
-                    sold_at = parse_sold_at(product.get('soldAt'))
+                # 如果soldAt为None（JSON的null），跳过不处理，保持原样
+                if sold_at_value is None:
+                    # 不做任何修改，保持现有状态
+                    continue
+                    
+                # 只处理有有效soldAt时间的已售出产品
+                if product.get('status') == 'sold' and sold_at_value:
+                    sold_at = parse_sold_at(sold_at_value)
                     
                     if sold_at:
-                        # 计算过期时间
-                        expire_dt = sold_at + timedelta(days=30)
+                        # 计算过期时间（根据tier决定天数）
+                        tier = tier_map.get(actual_key, 'medium')  # 默认为medium
+                        days_to_add = 1 if tier == 'trial' else 30
+                        expire_dt = sold_at + timedelta(days=days_to_add)
                         expire_timestamp = int(expire_dt.timestamp() * 1000)
-                        expire_date_str = expire_dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%dT%H:%M:%S")
+                        expire_date_str = expire_dt.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
                         
                         # 更新Redis中的expires_at和expires_date字段
                         r.hset(redis_key, mapping={
@@ -177,12 +201,6 @@ def update_client_keys_in_redis():
                         
                         updated_count += 1
                         logging.info(f"Updated Redis {redis_key}: expires_at={expire_timestamp}, expires_date={expire_date_str}")
-                else:
-                    # 未售出的key，确保expires_at为null或不存在
-                    if product.get('soldAt') == "NULL" or product.get('soldAt') is None:
-                        # 删除expires_at字段或设置为空值
-                        r.hdel(redis_key, 'expires_at', 'expires_date')
-                        logging.info(f"Cleared expires fields for unsold key: {redis_key}")
         
         logging.info(f"Updated {updated_count} client keys in Redis")
         return updated_count
@@ -199,8 +217,8 @@ def main():
     
     total_updated = 0
     
-    # 更新各级别产品文件
-    for tier in ['medium', 'high', 'supreme']:
+    # 更新各级别产品文件（Trial使用1天，其他使用30天）
+    for tier in ['trial', 'medium', 'high', 'supreme']:
         file_path = os.path.join(PRODUCT_DIR, f'{tier}.json')
         if os.path.exists(file_path):
             count = update_product_file(file_path, tier)

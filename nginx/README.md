@@ -1,140 +1,91 @@
-# Nginx SSL Setup for direct.816981.xyz
+# Nginx SSL配置文档
 
-本目录包含为域名 `direct.816981.xyz` 配置 Nginx 反向代理和 SSL 证书的所有必要文件。
+## 域名配置
+- **主域名**: api.justprompt.pro
+- **证书目录**: `/home/leon/claude-route-ssl/claude-route-ssl/nginx/ssl/`
+- **配置文件**: `/home/leon/claude-route-ssl/claude-route-ssl/nginx/api.justprompt.pro.conf`
 
-## 目录结构
+## 证书管理
 
-```
-nginx/
-├── conf.d/
-│   └── direct.816981.xyz.conf    # Nginx 配置文件
-├── logs/                          # 日志目录
-│   ├── access.log                 # 访问日志
-│   ├── error.log                  # 错误日志
-│   └── ssl-renewal.log            # SSL 续签日志
-├── ssl/                           # SSL 相关文件目录
-├── setup-ssl.sh                   # SSL 证书申请和配置脚本
-├── auto-renew.sh                  # SSL 证书自动续签脚本
-├── setup-cron.sh                  # 设置定时任务脚本
-└── README.md                      # 本说明文件
-```
-
-## 快速开始
-
-### 1. 确保域名解析正确
-确保 `direct.816981.xyz` 已经解析到你的服务器 IP。
-
-### 2. 安装必要依赖
+### 首次申请证书
 ```bash
-# 安装 nginx 和 certbot
-sudo apt update
-sudo apt install nginx certbot python3-certbot-nginx -y
+# 运行证书申请脚本
+./nginx/apply-cert.sh
 ```
 
-### 3. 启动 Claude Route SSL 服务
+### 证书自动续签
+证书会自动续签，续签任务通过用户crontab设置：
+- 每天凌晨2:30和下午2:30自动检查
+- 证书即将过期时自动续签
+- 续签后自动更新到项目目录并重载nginx
+- 使用当前用户(leon)的crontab，非系统cron
+
+### 手动续签证书
 ```bash
-# 确保项目在端口 8080 上运行
-npm start
+# 手动运行续签脚本
+./nginx/renew-cert.sh
 ```
 
-### 4. 执行 SSL 设置
+### 设置自动续签
 ```bash
-# 运行 SSL 设置脚本
-cd /home/leon/claude-route-ssl/claude-route-ssl/nginx
-./setup-ssl.sh
+# 运行cron设置脚本（只需运行一次）
+./nginx/setup-cron.sh
+
+# 查看当前用户的crontab
+crontab -l
+
+# 手动编辑crontab
+crontab -e
 ```
 
-### 5. 设置自动续签
+## 证书文件说明
+- `fullchain.pem`: 完整证书链（包含服务器证书和中间证书）
+- `privkey.pem`: 私钥文件（权限600，仅所有者可读写）
+- `cert.pem`: 服务器证书
+- `chain.pem`: 中间证书链
+
+## Nginx配置部署
+
+### 1. 链接配置文件到nginx
 ```bash
-# 设置 SSL 证书自动续签
-./setup-cron.sh
+sudo ln -s /home/leon/claude-route-ssl/claude-route-ssl/nginx/api.justprompt.pro.conf /etc/nginx/sites-available/
+sudo ln -s /etc/nginx/sites-available/api.justprompt.pro.conf /etc/nginx/sites-enabled/
 ```
 
-## 脚本说明
-
-### setup-ssl.sh
-- 自动配置 nginx
-- 申请 Let's Encrypt SSL 证书
-- 配置 HTTPS 重定向
-- 设置安全 headers
-- 配置反向代理到端口 8080
-
-### auto-renew.sh
-- 检查证书是否需要续签
-- 自动续签即将过期的证书
-- 记录续签日志
-- 自动重载 nginx 配置
-
-### setup-cron.sh
-- 设置定时任务
-- 每天两次检查证书状态
-- 自动执行续签操作
-
-## 使用说明
-
-### 手动测试 SSL 续签
+### 2. 测试配置
 ```bash
-sudo certbot renew --dry-run
+sudo nginx -t
 ```
 
-### 查看证书状态
+### 3. 重载nginx
 ```bash
-sudo certbot certificates
+sudo systemctl reload nginx
 ```
 
-### 查看 nginx 状态
-```bash
-sudo systemctl status nginx
-```
-
-### 查看日志
-```bash
-# 查看访问日志
-tail -f /home/leon/claude-route-ssl/claude-route-ssl/nginx/logs/access.log
-
-# 查看错误日志
-tail -f /home/leon/claude-route-ssl/claude-route-ssl/nginx/logs/error.log
-
-# 查看 SSL 续签日志
-tail -f /home/leon/claude-route-ssl/claude-route-ssl/nginx/logs/ssl-renewal.log
-```
-
-## 安全配置
-
-配置文件包含以下安全措施：
-- 强制 HTTPS 重定向
-- 现代 SSL/TLS 配置
-- 安全 headers (HSTS, X-Frame-Options, 等)
-- 禁用不安全的 SSL 协议
-- 配置适当的缓冲和超时设置
+## 日志文件
+- **访问日志**: `/var/log/nginx/api.justprompt.pro.access.log`
+- **错误日志**: `/var/log/nginx/api.justprompt.pro.error.log`
+- **续签日志**: `/home/leon/claude-route-ssl/claude-route-ssl/nginx/ssl/renew.log`
 
 ## 故障排除
 
 ### 证书申请失败
-1. 确认域名解析正确
-2. 检查防火墙设置 (端口 80, 443)
-3. 确认 nginx 配置语法正确
-4. 查看 certbot 详细错误信息
+1. 检查域名DNS解析是否正确指向服务器
+2. 确保80端口可访问（用于Let's Encrypt验证）
+3. 检查防火墙设置
 
-### Nginx 配置错误
-```bash
-# 测试配置语法
-sudo nginx -t
+### 证书续签失败
+1. 查看续签日志：`cat nginx/ssl/renew.log`
+2. 手动测试续签：`sudo certbot renew --dry-run`
+3. 检查cron任务：`crontab -l`
 
-# 重新加载配置
-sudo systemctl reload nginx
-```
+### Nginx无法启动
+1. 检查配置语法：`sudo nginx -t`
+2. 查看错误日志：`sudo tail -f /var/log/nginx/error.log`
+3. 确认证书文件存在且权限正确
 
-### SSL 证书续签失败
-1. 检查 certbot 服务状态
-2. 查看续签日志
-3. 手动执行续签测试
-4. 确认自动续签任务正常运行
-
-## 技术支持
-
-如需技术支持，请查看：
-- nginx 日志文件
-- SSL 续签日志
-- 系统日志 `/var/log/nginx/`
-- Certbot 日志 `/var/log/letsencrypt/`
+## 重要提示
+- 证书有效期为90天，建议提前30天续签
+- 自动续签脚本每天运行两次，确保及时续签
+- 续签后会自动复制到项目目录并重载nginx
+- 保持`/var/www/certbot`目录可访问，用于证书验证

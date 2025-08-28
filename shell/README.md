@@ -70,7 +70,7 @@ cd /home/leon/claude-route-ssl/claude-route-ssl/shell
 
 ### 核心服务
 - **PM2进程**: claude-proxy (端口8080)
-- **Nginx代理**: direct.816981.xyz → localhost:8080
+- **Nginx代理**: api.justprompt.pro → localhost:8080
 - **Redis存储**: 端口6380 (账户和密钥管理)
 - **SSL证书**: Let's Encrypt (自动续签)
 
@@ -98,7 +98,7 @@ shell/
 ## 🚦 使用流程
 
 ### 首次部署
-1. 确保域名 `direct.816981.xyz` 解析到服务器
+1. 确保域名 `api.justprompt.pro` 解析到服务器
 2. 安装依赖：nginx, certbot, redis-server, pm2
 3. 运行启动脚本：`./run.sh`
 
@@ -126,9 +126,9 @@ shell/
 - **80/443**: Nginx HTTP/HTTPS
 
 ### SSL证书
-- 域名：direct.816981.xyz
+- 域名：api.justprompt.pro
 - 自动续签已配置
-- 证书路径：`/etc/letsencrypt/live/direct.816981.xyz/`
+- 证书路径：`/etc/letsencrypt/live/api.justprompt.pro/`
 
 ### 数据存储
 - 账户数据：`/account/` 目录

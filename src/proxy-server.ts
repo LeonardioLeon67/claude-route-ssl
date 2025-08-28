@@ -2,7 +2,7 @@ import express from 'express';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
-import TokenRefresherRedis from './token-refresher-redis';
+// import TokenRefresherRedis from './token-refresher-redis'; // 已删除，由token-refresh-daemon处理
 import MultiAccountManager from './multi-account-manager';
 import { createClient, RedisClientType } from 'redis';
 
@@ -25,7 +25,7 @@ function getBeijingTime(): string {
 
 const app = express();
 const PORT = 8080;
-const tokenRefresher = new TokenRefresherRedis();
+// const tokenRefresher = new TokenRefresherRedis(); // 已删除
 const accountManager = new MultiAccountManager();
 
 // 清理废弃数据和过期密钥
@@ -72,8 +72,8 @@ async function cleanupExpiredClientKeys() {
           
           // 清理slot占用（如果使用账户池）
           if (keyData.use_pool === 'true' || keyData.account_name === 'pool' || 
-              keyData.account_name === 'medium_pool' || keyData.account_name === 'high_pool' || 
-              keyData.account_name === 'supreme_pool') {
+              keyData.account_name === 'trial_pool' || keyData.account_name === 'medium_pool' || 
+              keyData.account_name === 'high_pool' || keyData.account_name === 'supreme_pool') {
             
             const permanentBindingKey = `${keyData.tier}_pool:permanent_binding`;
             const assignedAccount = await redisClient.hGet(permanentBindingKey, clientKey);
@@ -179,24 +179,10 @@ async function getAccessToken(accountName?: string): Promise<string> {
       // 🔥 步骤2: 如果需要刷新，立即刷新并强制重载
       if (now >= oneMinuteBeforeExpiry) {
         console.log(`[${getBeijingTime()}] 🔄 立即刷新token: ${accountName}`);
-        const refreshSuccess = await tokenRefresher.refreshToken(accountName);
+        // const refreshSuccess = await tokenRefresher.refreshToken(accountName); // 已由daemon处理
         
-        if (refreshSuccess) {
-          // 🔥 强制重新加载以获取最新token - 绝对不能有延迟！
-          console.log(`[${getBeijingTime()}] 🚀 强制重载最新token数据: ${accountName}`);
-          const refreshedAccount = await accountManager.getAccount(accountName, true);
-          
-          if (refreshedAccount?.credentials.accessToken) {
-            const newToken = refreshedAccount.credentials.accessToken;
-            console.log(`[${getBeijingTime()}] ✅ 新token已获取: ${newToken.substring(0, 30)}...`);
-            console.log(`[${getBeijingTime()}] 🎯 立即返回新token给新连接`);
-            return newToken;
-          } else {
-            console.error(`[${getBeijingTime()}] ❌ 刷新后未能获取新token!`);
-          }
-        } else {
-          console.error(`[${getBeijingTime()}] ❌ Token刷新失败!`);
-        }
+        // Token刷新已由daemon处理，这里跳过刷新逻辑
+        console.log(`[${getBeijingTime()}] 🔄 Token刷新已由daemon处理`);
       }
       
       // 🔥 步骤3: 返回当前token（如果不需要刷新或刷新失败）
@@ -213,19 +199,19 @@ async function getAccessToken(accountName?: string): Promise<string> {
   // 🔥 步骤4: 回退到默认行为（但优先使用最新数据）
   console.log(`[${getBeijingTime()}] 🔄 回退到默认token获取方式`);
   
-  // 先尝试从缓存获取（如果没过期）
-  const cachedToken = tokenRefresher.getCachedAccessToken();
-  if (cachedToken) {
-    console.log(`[${getBeijingTime()}] 📋 使用缓存token: ${cachedToken.substring(0, 30)}...`);
-    return cachedToken;
-  }
+  // 先尝试从缓存获取（如果没过期）- 已由daemon处理
+  // const cachedToken = tokenRefresher.getCachedAccessToken();
+  // if (cachedToken) {
+  //   console.log(`[${getBeijingTime()}] 📋 使用缓存token: ${cachedToken.substring(0, 30)}...`);
+  //   return cachedToken;
+  // }
   
-  // 强制获取最新credentials
-  const currentToken = await tokenRefresher.getCurrentAccessToken();
-  if (currentToken) {
-    console.log(`[${getBeijingTime()}] 📁 使用最新token: ${currentToken.substring(0, 30)}...`);
-    return currentToken;
-  }
+  // 强制获取最新credentials - 已由daemon处理
+  // const currentToken = await tokenRefresher.getCurrentAccessToken();
+  // if (currentToken) {
+  //   console.log(`[${getBeijingTime()}] 📁 使用最新token: ${currentToken.substring(0, 30)}...`);
+  //   return currentToken;
+  // }
   
   console.error(`[${getBeijingTime()}] ❌ 无法获取任何有效token!`);
   return '';
@@ -290,18 +276,60 @@ async function proxyRequest(req: express.Request, res: express.Response) {
         keyData = await redisClient.hGetAll(redisKey);
         
         if (keyData && keyData.account_name && keyData.active === 'true') {
+          // 检查密钥状态（未售出的密钥不能使用）
+          if (keyData.status === 'unsold') {
+            console.log(`[${getBeijingTime()}] Client key is unsold and cannot be used: ${clientKey.substring(0, 20)}...`);
+            // 未售出的密钥可以正常使用（相当于预激活状态）
+            // 如果需要禁止未售出密钥使用，可以取消注释以下代码：
+            /*
+            return res.status(403).json({
+              type: 'error',
+              error: {
+                type: 'permission_error',
+                message: 'This API key is not yet activated. Please contact administrator.'
+              }
+            });
+            */
+          }
+          
+          // 对于已售出的密钥，动态计算过期时间
+          let effectiveExpiryTime = 0;
+          const now = Date.now();
+          
+          if (keyData.status === 'sold') {
+            // 从产品文件获取soldAt和计算的过期时间
+            try {
+              const productFile = `/home/leon/claude-route-ssl/claude-route-ssl/product/${keyData.tier}.json`;
+              const fs = require('fs');
+              if (fs.existsSync(productFile)) {
+                const products = JSON.parse(fs.readFileSync(productFile, 'utf-8'));
+                const product = products[clientKey];
+                if (product && product.soldAt && product.expiresAt) {
+                  effectiveExpiryTime = product.expiresAt;
+                  console.log(`[${getBeijingTime()}] Using calculated expiry from product file: ${new Date(effectiveExpiryTime).toISOString()}`);
+                }
+              }
+            } catch (error) {
+              console.error('Error reading product file for expiry:', error);
+            }
+          }
+          
+          // 如果没有从产品文件获取到，使用Redis中的expires_at作为备用
+          if (!effectiveExpiryTime && keyData.expires_at && keyData.expires_at !== '') {
+            effectiveExpiryTime = parseInt(keyData.expires_at);
+          }
+          
           // 检查密钥是否过期
-          if (keyData.expires_at) {
-            const expiryTime = parseInt(keyData.expires_at);
-            const now = Date.now();
+          if (effectiveExpiryTime > 0) {
+            const expiryTime = effectiveExpiryTime;
             if (now > expiryTime) {
               console.log(`[${getBeijingTime()}] Client key expired at ${new Date(expiryTime).toISOString()}: ${clientKey.substring(0, 20)}...`);
               
               // 🔥 新增：清理过期密钥的slot占用
               try {
                 if (keyData.use_pool === 'true' || keyData.account_name === 'pool' || 
-                    keyData.account_name === 'medium_pool' || keyData.account_name === 'high_pool' || 
-                    keyData.account_name === 'supreme_pool') {
+                    keyData.account_name === 'trial_pool' || keyData.account_name === 'medium_pool' || 
+                    keyData.account_name === 'high_pool' || keyData.account_name === 'supreme_pool') {
                   
                   // 获取永久绑定的账户
                   const permanentBindingKey = `${keyData.tier}_pool:permanent_binding`;
@@ -342,6 +370,7 @@ async function proxyRequest(req: express.Request, res: express.Response) {
           
           // 检查是否使用账户池
           if (keyData.use_pool === 'true' || 
+              keyData.account_name === 'trial_pool' || 
               keyData.account_name === 'medium_pool' || 
               keyData.account_name === 'high_pool' || 
               keyData.account_name === 'supreme_pool' || 
@@ -394,17 +423,42 @@ async function proxyRequest(req: express.Request, res: express.Response) {
       modelType = 'sonnet_4';
     }
     
+    // Trial和Medium级别特殊处理：只能使用Sonnet模型
+    if ((keyData.tier === 'trial' || keyData.tier === 'medium') && !requestModel.includes('sonnet')) {
+      const tierName = keyData.tier.charAt(0).toUpperCase() + keyData.tier.slice(1);
+      return res.status(403).json({
+        type: 'error',
+        error: {
+          type: 'permission_error',
+          message: `${tierName} tier can only use Sonnet models. Please upgrade to use other models.`
+        }
+      });
+    }
+    
     // 基于模型的5小时时间窗口请求限制检查
-    if (modelType && (keyData.tier === 'high' || keyData.tier === 'supreme')) {
+    if (modelType && (keyData.tier === 'high' || keyData.tier === 'supreme' || keyData.tier === 'trial' || keyData.tier === 'medium')) {
       limitKey = `${modelType}_per_5_hours`;
       countKey = `${modelType}_current_window_requests`;
       windowStartKey = `${modelType}_current_window_start`;
       
-      if (keyData[limitKey]) {
+      // Trial/Medium级别或其他级别的限制处理
+      let hasLimit = false;
+      let maxRequests = 0;
+      
+      if ((keyData.tier === 'trial' || keyData.tier === 'medium') && modelType === 'sonnet_4') {
+        // Trial和Medium级别只对Sonnet模型有限制
+        hasLimit = true;
+        maxRequests = 42;
+      } else if (keyData[limitKey]) {
+        // High和Supreme级别根据配置限制
+        hasLimit = true;
+        maxRequests = parseInt(keyData[limitKey]);
+      }
+      
+      if (hasLimit) {
         const now = Date.now();
         // 5小时时间窗口 (生产环境标准配置)
         const windowSize = 5 * 60 * 60 * 1000; // 5小时 = 18000000毫秒
-        const maxRequests = parseInt(keyData[limitKey]);
         let currentWindowStart = parseInt(keyData[windowStartKey] || now.toString());
         let currentWindowRequests = parseInt(keyData[countKey] || '0');
         
@@ -438,6 +492,12 @@ async function proxyRequest(req: express.Request, res: express.Response) {
           const minutesLeft = Math.floor((remainingTime % (60 * 60 * 1000)) / (60 * 1000));
           const timeMessage = `Usage will be reset in ${hoursLeft}h ${minutesLeft}m`;
           
+          // 添加不重试的响应头
+          res.setHeader('retry-after', '0');
+          res.setHeader('x-retry-forbidden', 'true');
+          res.setHeader('x-no-retry', 'true');
+          console.log(`🚫 429错误：${modelDisplayName} 超过限制，已告知客户端不要重试`);
+          
           return res.status(429).json({
             type: 'error',
             error: {
@@ -448,14 +508,11 @@ async function proxyRequest(req: express.Request, res: express.Response) {
         }
         
         const modelDisplayName = modelType === 'opus_4' ? 'Opus 4.1' : 'Sonnet 4';
-        console.log(`[${getBeijingTime()}] ${modelDisplayName} rate limit check passed: ${currentWindowRequests + 1}/${maxRequests} requests in 5-hour window`);
+        const tierInfo = (keyData.tier === 'trial' || keyData.tier === 'medium') ? ` (${keyData.tier.charAt(0).toUpperCase() + keyData.tier.slice(1)} tier)` : '';
+        console.log(`[${getBeijingTime()}] ${modelDisplayName}${tierInfo} rate limit check passed: ${currentWindowRequests + 1}/${maxRequests} requests in 5-hour window`);
       }
     }
     
-    // Medium级别无请求限制，直接跳过限制检查
-    else if (keyData.tier === 'medium') {
-      console.log(`[${getBeijingTime()}] Medium tier - no rate limits applied`);
-    }
 
     // 获取真实的access token
     let accessToken: string = '';
@@ -531,11 +588,13 @@ async function proxyRequest(req: express.Request, res: express.Response) {
         // 如果没有分配账户，需要分配一个
         if (!currentAccount) {
           // 查找可用账户（未达到占用上限）- 不同级别有不同的slot配置
-          let MAX_SLOTS = 1; // Medium默认1个
-          if (keyData.tier === 'high') {
-            MAX_SLOTS = 4; // High级别每个账户4个位置
+          let MAX_SLOTS = 1; // 默认1个
+          if (keyData.tier === 'trial' || keyData.tier === 'medium') {
+            MAX_SLOTS = 7; // Trial和Medium级别每个账户7个位置
+          } else if (keyData.tier === 'high') {
+            MAX_SLOTS = 3; // High级别每个账户3个位置
           } else if (keyData.tier === 'supreme') {
-            MAX_SLOTS = 3; // Supreme级别每个账户3个位置
+            MAX_SLOTS = 2; // Supreme级别每个账户2个位置
           }
           let availableAccounts: string[] = [];
           
@@ -600,11 +659,13 @@ async function proxyRequest(req: express.Request, res: express.Response) {
           // 使用已分配的账户
           const slotKey = `${keyData.tier}_pool:slots:${currentAccount}`;
           const currentSlots = await redisClient.get(slotKey);
-          let maxSlots = 1; // Medium默认1个
-          if (keyData.tier === 'high') {
-            maxSlots = 4; // High级别4个位置
+          let maxSlots = 1; // 默认1个
+          if (keyData.tier === 'trial' || keyData.tier === 'medium') {
+            maxSlots = 7; // Trial和Medium级别7个位置
+          } else if (keyData.tier === 'high') {
+            maxSlots = 3; // High级别3个位置
           } else if (keyData.tier === 'supreme') {
-            maxSlots = 3; // Supreme级别3个位置
+            maxSlots = 2; // Supreme级别2个位置
           }
           console.log(`[${getBeijingTime()}] 📌 Key ${clientKey.substring(0, 20)}... 使用永久绑定账户: ${currentAccount} (slots: ${currentSlots}/${maxSlots})`);
         }
@@ -648,12 +709,12 @@ async function proxyRequest(req: express.Request, res: express.Response) {
       }
     }
     
-    // 检查token是否已被映射到新token
-    const mappedToken = await tokenRefresher.getTokenMapping(accessToken);
-    if (mappedToken) {
-      console.log('Using mapped token (token was refreshed)');
-      accessToken = mappedToken;
-    }
+    // 检查token是否已被映射到新token - 已由daemon处理
+    // const mappedToken = await tokenRefresher.getTokenMapping(accessToken);
+    // if (mappedToken) {
+    //   console.log('Using mapped token (token was refreshed)');
+    //   accessToken = mappedToken;
+    // }
 
     // 构建目标URL - 使用 originalUrl 获取完整路径和查询参数
     const targetUrl = `https://api.anthropic.com${req.originalUrl || req.url}`;
@@ -759,7 +820,7 @@ async function proxyRequest(req: express.Request, res: express.Response) {
           const files = fs.readdirSync(accountDir).filter(file => file.endsWith('.json'));
           
           // 查找可用账户（复用现有逻辑）
-          let MAX_SLOTS = keyData.tier === 'high' ? 4 : keyData.tier === 'supreme' ? 3 : 1;
+          let MAX_SLOTS = (keyData.tier === 'trial' || keyData.tier === 'medium') ? 7 : keyData.tier === 'high' ? 3 : keyData.tier === 'supreme' ? 2 : 1; // 默认1个
           let availableAccounts: string[] = [];
           
           for (const file of files) {
@@ -894,10 +955,20 @@ async function proxyRequest(req: express.Request, res: express.Response) {
             // 成功完成请求后递增计数器
             if (retryResponse.status >= 200 && retryResponse.status < 400) {
               try {
-                if (modelType && (keyData.tier === 'high' || keyData.tier === 'supreme') && keyData[limitKey]) {
+                // Trial和Medium级别对Sonnet模型进行计数
+                if ((keyData.tier === 'trial' || keyData.tier === 'medium') && modelType === 'sonnet_4') {
+                  const newCount = await redisClient.hIncrBy(`client_keys:${clientKey}`, countKey, 1);
+                  console.log(`[${keyData.tier.toUpperCase()} Pool] Sonnet 4 requests: ${newCount}/35 (next 5h)`);
+                }
+                // High/Supreme级别计数
+                else if (modelType && (keyData.tier === 'high' || keyData.tier === 'supreme') && keyData[limitKey]) {
                   const newCount = await redisClient.hIncrBy(`client_keys:${clientKey}`, countKey, 1);
                   const modelDisplayName = modelType === 'opus_4' ? 'Opus 4.1' : 'Sonnet 4';
                   console.log(`[${keyData.tier.toUpperCase()} Pool] ${modelDisplayName} requests: ${newCount}/${keyData[limitKey]} (next 5h)`);
+                }
+                // 不需要计数的情况
+                else {
+                  console.log(`[${keyData.tier.toUpperCase()} Pool] Request completed - no counting needed`);
                 }
               } catch (countError) {
                 console.error('Failed to increment request count:', countError);
@@ -1007,15 +1078,20 @@ async function proxyRequest(req: express.Request, res: express.Response) {
       // 成功完成请求后递增计数器
       if (response.status >= 200 && response.status < 400) {
         try {
-          // 基于模型的计数（High和Supreme级别）
-          if (modelType && (keyData.tier === 'high' || keyData.tier === 'supreme') && keyData[limitKey]) {
+          // Trial和Medium级别对Sonnet模型进行计数
+          if ((keyData.tier === 'trial' || keyData.tier === 'medium') && modelType === 'sonnet_4') {
+            const newCount = await redisClient.hIncrBy(`client_keys:${clientKey}`, countKey, 1);
+            console.log(`[${getBeijingTime()}] [${keyData.tier.toUpperCase()}] Sonnet 4 request count updated: ${newCount}/35 for key ${clientKey.substring(0, 20)}...`);
+          }
+          // High和Supreme级别基于模型的计数
+          else if (modelType && (keyData.tier === 'high' || keyData.tier === 'supreme') && keyData[limitKey]) {
             const newCount = await redisClient.hIncrBy(`client_keys:${clientKey}`, countKey, 1);
             const modelDisplayName = modelType === 'opus_4' ? 'Opus 4.1' : 'Sonnet 4';
-            console.log(`[${getBeijingTime()}] ${modelDisplayName} request count updated: ${newCount}/${keyData[limitKey]} for key ${clientKey.substring(0, 20)}...`);
+            console.log(`[${getBeijingTime()}] [${keyData.tier.toUpperCase()}] ${modelDisplayName} request count updated: ${newCount}/${keyData[limitKey]} for key ${clientKey.substring(0, 20)}...`);
           }
-          // Medium级别无限制，不需要计数
-          else if (keyData.tier === 'medium') {
-            console.log(`[${getBeijingTime()}] Medium tier request completed - no counting needed for key ${clientKey.substring(0, 20)}...`);
+          // 不需要计数的情况
+          else {
+            console.log(`[${getBeijingTime()}] [${keyData.tier.toUpperCase()}] Request completed - no counting needed for key ${clientKey.substring(0, 20)}...`);
           }
         } catch (error) {
           console.error('Error updating request count:', error);
@@ -1104,6 +1180,14 @@ async function proxyRequest(req: express.Request, res: express.Response) {
       // 转发原始错误响应
       res.status(error.response.status);
       
+      // 对于429错误，添加不重试的响应头
+      if (error.response.status === 429) {
+        res.setHeader('retry-after', '0');
+        res.setHeader('x-retry-forbidden', 'true');
+        res.setHeader('x-no-retry', 'true');
+        console.log('🚫 429错误：已告知客户端不要重试');
+      }
+      
       // 转发错误响应头
       Object.entries(error.response.headers).forEach(([key, value]) => {
         if (key.toLowerCase() !== 'connection' && 
@@ -1169,12 +1253,8 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log('- Auto token refresh (checks every 30 minutes)');
   
   
-  // 🔗 设置多账户管理器引用，确保刷新后立即同步
-  tokenRefresher.setAccountManager(accountManager);
-  
-  // 🎯 启动多账户精确时间事件触发的token刷新机制
-  await tokenRefresher.startMultiAccountPreciseRefresh();
-  console.log('✅ 多账户精确时间触发的token刷新机制已启动 (每个账户独立管理)');
+  // Token刷新由独立的token-refresh-daemon.js处理
+  console.log('✅ Token刷新由token-refresh-daemon.js独立管理');
   
   // Redis版本不需要文件监听，因为直接从Redis读取
   console.log('Using Redis for token storage (port 6380) - token updates will be applied immediately');

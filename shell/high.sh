@@ -62,9 +62,8 @@ add_key_mapping() {
     local client_key=$1
     local client_name=$2
     local account_name=$3
-    local expiry_days=${4:-30}  # 默认30天有效期
     local current_time=$(date +%s000)  # 毫秒时间戳
-    local expiry_time=$(date -d "+${expiry_days} days" +%s000)  # 过期时间
+    # 未售出的产品不设置过期时间
     
     
     # 如果产品文件不存在，创建一个空的JSON文件
@@ -83,7 +82,6 @@ key = "$client_key"
 client_name = "$client_name"
 account_name = "$account_name"
 timestamp = $current_time
-expiry_timestamp = $expiry_time
 PRODUCT_FILE = "$PRODUCT_FILE"
 
 # 连接Redis
@@ -134,15 +132,15 @@ if redis_connected:
             "tier": "high",
             "created_at": timestamp,
             "created_date": datetime.now(timezone(timedelta(hours=8))).isoformat(),
-            "expires_at": str(expiry_timestamp),
-            "expires_date": datetime.fromtimestamp(expiry_timestamp/1000).isoformat(),
+            "expires_at": "",
+            "expires_date": "",
             "active": "true",
             "status": "unsold",  # 添加销售状态
             # High级别分模型限制
-            "opus_4_per_5_hours": "45",  # Opus 4.1 每5小时45次
+            "opus_4_per_5_hours": "10",  # Opus 4.1 每5小时10次
             "opus_4_current_window_start": str(timestamp),
             "opus_4_current_window_requests": "0",
-            "sonnet_4_per_5_hours": "180",  # Sonnet 4 每5小时180次  
+            "sonnet_4_per_5_hours": "50",  # Sonnet 4 每5小时50次  
             "sonnet_4_current_window_start": str(timestamp),
             "sonnet_4_current_window_requests": "0"
         })
@@ -178,7 +176,7 @@ if redis_connected:
             "sold_at": "",
             "order_no": "",
             "created_at": timestamp,
-            "expires_at": str(expiry_timestamp)
+            "expires_at": ""
         })
         
         print(f"Key saved to Redis under client_keys:{key}")
@@ -316,8 +314,8 @@ main() {
         echo -e "${GREEN}Product Name:${NC} $client_name"
         echo -e "${GREEN}Product Key:${NC}  $new_key"
         echo -e "${GREEN}Status:${NC}       unsold"
-        echo -e "${GREEN}Created:${NC}      $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S') (北京时间)"
-        echo -e "${GREEN}Expires:${NC}      $(TZ='Asia/Shanghai' date -d "+${expiry_days:-30} days" '+%Y-%m-%d %H:%M:%S') (北京时间)"
+        echo -e "${GREEN}Created:${NC}      $(TZ='Asia/Shanghai' date '+%Y-%m-%d %H:%M:%S')"
+        echo -e "${GREEN}Expires:${NC}      $(TZ='Asia/Shanghai' date -d "+${expiry_days:-30} days" '+%Y-%m-%d %H:%M:%S')"
         echo -e "${GREEN}Valid Days:${NC}   ${expiry_days:-30} days"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
@@ -338,19 +336,19 @@ main() {
         echo ""
         echo "Client Configuration:"
         echo "─────────────────────────────────────────────────────────────────────"
-        echo "Base URL: https://direct.816981.xyz"
+        echo "Base URL: https://api.justprompt.pro"
         echo "API Key:  $new_key"
         echo ""
         echo "Usage Examples:"
         echo "─────────────────────────────────────────────────────────────────────"
         echo "1. Using x-api-key header:"
-        echo "   curl -X POST https://direct.816981.xyz/v1/messages \\"
+        echo "   curl -X POST https://api.justprompt.pro/v1/messages \\"
         echo "     -H \"x-api-key: $new_key\" \\"
         echo "     -H \"Content-Type: application/json\" \\"
         echo "     -d '{\"model\": \"claude-3-5-haiku-20241022\", ...}'"
         echo ""
         echo "2. Using Authorization header:"
-        echo "   curl -X POST https://direct.816981.xyz/v1/messages \\"
+        echo "   curl -X POST https://api.justprompt.pro/v1/messages \\"
         echo "     -H \"Authorization: Bearer $new_key\" \\"
         echo "     -H \"Content-Type: application/json\" \\"
         echo "     -d '{\"model\": \"claude-3-5-haiku-20241022\", ...}'"
