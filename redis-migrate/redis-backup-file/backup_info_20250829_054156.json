@@ -1,0 +1,27 @@
+{
+  "backup_time": "2025-08-29 05:41:58",
+  "backup_timestamp": "20250829_054156",
+  "redis_port": 6380,
+  "redis_host": "localhost",
+  "backup_file": "redis_backup_20250829_054156.rdb",
+  "keys_file": "backup_keys_20250829_054156.txt",
+  "project_root": "/home/leon/claude-route-ssl/claude-route-ssl",
+  "statistics": {
+    "total_keys": 132,
+    "memory_used": "2.15M",
+    "client_keys": 50,
+    "trial_products": 24,
+    "medium_products": 15,
+    "high_products": 5,
+    "supreme_products": 6,
+    "trial_slots": 5,
+    "medium_slots": 1,
+    "high_slots": 1,
+    "supreme_slots": 1,
+    "blacklist_keys": 4,
+    "refresh_keys": 3,
+    "binding_keys": 0
+  },
+  "file_size": "40K",
+  "backup_command": "redis-cli -p 6380 BGSAVE"
+}
